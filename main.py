@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""我能永远记住你（Astr_Amo_data）。
+"""我能永远记住你（Astrbot_amoupup_data）。
 
 给「我能永远陪伴你」配套的轻量数据后端：记忆、画像、关系网、缓存。
 
@@ -82,8 +82,8 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
             def describe_span(*args, **kwargs):
                 return ""
 
-PLUGIN_NAME = "Astr_Amo_data"
-PLUGIN_VERSION = "2.8.2"
+PLUGIN_NAME = "Astrbot_amoupup_data"
+PLUGIN_VERSION = "2.8.4"
 DEFAULT_BOT_ID = "default"
 
 
@@ -861,7 +861,15 @@ class AmoDataPlugin(Star):
         """拿陪伴插件实例（没装/没加载就返回 None），用于同步删除画像。"""
         try:
             getter = getattr(self.context, "get_registered_star", None)
-            meta = getter("Astrbot_Amo_forever") if callable(getter) else None
+            meta = None
+            if callable(getter):
+                for _name in ("Astrbot_amoupup_forever", "Astrbot_Amo_forever"):
+                    try:
+                        meta = getter(_name)
+                    except Exception:
+                        meta = None
+                    if meta is not None:
+                        break
             return getattr(meta, "star_cls", None) if meta is not None else None
         except Exception as exc:
             logger.debug("[amo_data] 查找陪伴插件失败: %s" % exc)

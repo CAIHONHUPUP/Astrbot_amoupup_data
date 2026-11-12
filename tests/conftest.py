@@ -7,6 +7,14 @@ DSH 在 Windows 上给「0700 私有目录」加了拒绝 ACE（sandbox SID + DE
 """
 import os
 import tempfile
+import time as _time
+
+# 测试固定按插件默认时区算，避免 GitHub Actions 的 UTC runner 和本地差 8 小时。
+os.environ["TZ"] = "Asia/Shanghai"
+try:
+    _time.tzset()
+except AttributeError:  # Windows 没有 tzset：本地时区本来就是上海
+    pass
 
 _BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".test-tmp")
 os.makedirs(_BASE, exist_ok=True)

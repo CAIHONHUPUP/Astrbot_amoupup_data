@@ -924,18 +924,18 @@ class PluginApiCase(unittest.TestCase):
 
     def test_web_api_cleanup_replaces_stale_routes(self) -> None:
         self.context.registered_web_apis.extend([
-            ("/Astr_Amo_data/old-route", ["GET", "POST"], "old"),
+            ("/Astrbot_amoupup_data/old-route", ["GET", "POST"], "old"),
             ("/other/keep", ["GET"], "keep"),
         ])
         plugin = self.make_plugin()
         try:
             routes = [item[0] for item in self.context.registered_web_apis]
-            self.assertNotIn("/Astr_Amo_data/old-route", routes)
+            self.assertNotIn("/Astrbot_amoupup_data/old-route", routes)
             self.assertIn("/other/keep", routes)
-            own = [route for route in routes if route.startswith("/Astr_Amo_data/")]
+            own = [route for route in routes if route.startswith("/Astrbot_amoupup_data/")]
             self.assertEqual(len(own), 31)
-            self.assertIn("/Astr_Amo_data/status", own)
-            self.assertIn("/Astr_Amo_data/backup/now", own)
+            self.assertIn("/Astrbot_amoupup_data/status", own)
+            self.assertIn("/Astrbot_amoupup_data/backup/now", own)
         finally:
             plugin.store.close()
 

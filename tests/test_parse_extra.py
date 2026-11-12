@@ -136,6 +136,8 @@ class ClockExtraTests(unittest.TestCase):
         os.environ.pop("TZ", None)
 
     def test_applied_false_is_safe(self):
+        # 其它测试可能 import 插件并触发 clock.configure()，先还原再断言
+        clock.restore()
         self.assertFalse(clock.applied())
 
 

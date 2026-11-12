@@ -1,3 +1,9 @@
+## 2.8.4（2026-11-12 CI 时区修复）
+- 测试进程固定 `Asia/Shanghai`（`tests/conftest.py` + `tzset`），修 GitHub Actions 的 UTC runner 下
+  `test_time_recall_store` 等 7 项时间测试差 8 小时的失败；
+- `test_applied_false_is_safe` 先 `clock.restore()`，避免前面测试的 clock 状态串进来；
+- 功能代码不变。
+
 ## 2.8.2（2026-11-12 独立仓库 + 更名「我能永远记住你」）
 - 仓库从 fork 改为**独立仓库**：`CAIHONHUPUP/Astrbot_amoupup_data`；
 - README 更名、GitHub 地址改成本仓库；

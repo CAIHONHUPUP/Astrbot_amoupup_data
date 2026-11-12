@@ -4,7 +4,12 @@
 
 > GitHub：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
 
+## 2.8.4 CI 时区修复
+
+- 测试固定上海时区，修 GitHub Actions 上 7 项时间测试失败；功能不变。
+
 ## 2.8.2 独立仓库 + 更名「我能永远记住你」
+
 
 - 仓库从 fork 改为独立仓库 `CAIHONHUPUP/Astrbot_amoupup_data`；
 - README 更名、GitHub 地址改成本仓库。
