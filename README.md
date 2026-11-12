@@ -4,6 +4,10 @@
 
 > GitHub：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
 
+## 2.9.1 CI 类型检查修复
+
+- 补主 uid 映射的类型声明，mypy 通过。
+
 ## 2.9.0 版本号改单段进位
 
 - 2.8.9 → 2.9.0，2.9.9 → 3.0.0；不再要求偶数/避开 1、7。

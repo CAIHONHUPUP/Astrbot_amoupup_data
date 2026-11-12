@@ -49,6 +49,10 @@ else:  # 运行时用 object：协议里的声明不能进 MRO，否则会挡掉
 
 
 class MessagesMixin(_StoreBase):
+    if TYPE_CHECKING:
+        canonical_uid: Any
+        canonical_uid_for_uid: Any
+
     def add_message(self, bot_id: str, umo: str, uid: str = "", name: str = "",
                     role: str = "user", content: str = "", platform: str = "",
                     created_at: int = 0, message_id: str = "") -> int:

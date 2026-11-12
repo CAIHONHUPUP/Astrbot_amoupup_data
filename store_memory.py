@@ -150,6 +150,10 @@ else:  # 运行时用 object：协议里的声明不能进 MRO，否则会挡掉
 
 
 class MemoryMixin(_StoreBase):
+    if TYPE_CHECKING:
+        canonical_uid: Any
+        canonical_uid_for_uid: Any
+
     _emb_thread: Optional[threading.Thread]
     _emb_down_until: float
 
