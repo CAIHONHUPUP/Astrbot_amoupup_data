@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我能永远记住你</title>
+<style>
+  :root { --bg:#f7f5f8; --card:#fff; --text:#2c2430; --muted:#8a8090; --line:#ebe4ee; --pink:#d4578a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px; }
+  header { padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  .badge { font-size:11px; color:var(--muted); }
+  nav { display:flex; gap:6px; padding:10px 16px 0; overflow-x:auto; }
+  nav button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:6px 12px; border-radius:8px; font-size:13px; cursor:pointer; white-space:nowrap; }
+  nav button.active { border-color:var(--pink); color:var(--pink); }
+  main { padding:12px 16px 40px; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:120px; }
+  input, select, textarea { width:100%; border:1px solid var(--line); border-radius:8px; padding:7px 9px; font-size:13px; background:#fff; color:var(--text); font-family:inherit; }
+  textarea { min-height:60px; resize:vertical; }
+  label { display:block; font-size:12px; color:var(--muted); margin:6px 0 3px; }
+  button.primary { background:var(--pink); color:#fff; border:none; border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12px; cursor:pointer; color:var(--muted); }
+  button.danger { color:#c0392b; border-color:#f0d7d3; }
+  .modal { position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(6,5,16,.66); backdrop-filter:blur(5px); }
+  .modal[hidden] { display:none; }
+  .modal-card { width:min(92vw,520px); max-height:82vh; overflow:auto; background:linear-gradient(165deg,#1e1938,#0c0918 72%); color:#f1ecff; border:1px solid rgba(255,255,255,0.14); border-radius:18px; padding:16px 18px; box-shadow:0 24px 70px rgba(0,0,0,0.55); }
+  .modal-card .hint { color:#b9addb; }
+  .rel-node-edge { display:grid; grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:8px; padding:9px 10px; margin-top:6px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); cursor:pointer; }
+  .rel-node-edge input { accent-color:#ff5fa2; }
+  .rel-node-edge .edge-left { text-align:right; color:#f3edff; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rel-node-edge .edge-right { text-align:left; color:#f3edff; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rel-node-edge .edge-center { display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.15; min-width:64px; }
+  .rel-node-edge .edge-relation { font-size:11px; color:#ffd6e8; background:rgba(255,95,162,0.18); border:1px solid rgba(255,95,162,0.38); border-radius:999px; padding:0 7px; margin-bottom:1px; }
+  .rel-node-edge .edge-arrow { color:#ff9cc6; font-size:15px; font-weight:600; }
+  .rel-node-edge .edge-note { color:#a99bd0; font-size:10px; margin-top:1px; white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
+  .rel-node-delete { width:100%; margin-top:12px; padding:10px; border-radius:10px; font-weight:600; color:#ffd6e4; border:1px solid rgba(255,95,162,0.5); background:linear-gradient(90deg, rgba(255,95,162,0.22), rgba(255,95,162,0.08)); }
+  #panel-relations .card { background:radial-gradient(circle at 25% 15%, #251d46, #0b0817 72%); border-color:#2b2442; color:#efe9ff; }
+  #panel-relations .card .hint { color:#b5a9d6; }
+  #panel-relations .ghost { color:#e7dcff; border-color:rgba(255,255,255,0.2); }
+  #relGraph { border-radius:14px; box-shadow:inset 0 0 60px rgba(0,0,0,0.5); }
+  .list { display:flex; flex-direction:column; gap:6px; }
+  .item { border:1px solid var(--line); border-radius:10px; padding:9px 10px; display:flex; gap:10px; align-items:center; cursor:pointer; background:#fff; }
+  .item:hover { border-color:#e0d3e6; }
+  .item .name { font-weight:600; font-size:13px; }
+  .item .sub { font-size:11px; color:var(--muted); margin-top:2px; word-break:break-all; }
+  .msg { padding:7px 0; border-bottom:1px dashed var(--line); display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+  .msg:last-child { border-bottom:none; }
+  /* 名字太长会把正文挤成一列竖排：限宽 + 省略号，正文自己会换行 */
+  .msg .who { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:56px; max-width:34%; flex:0 0 auto; }
+  .msg .txt { flex:1 1 120px; min-width:0; font-size:13px; word-break:break-word; overflow-wrap:anywhere; }
+  .msg .time { font-size:11px; color:var(--muted); white-space:nowrap; flex:0 0 auto; margin-left:auto; }
+  .empty { color:var(--muted); font-size:12px; padding:10px 0; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); background:rgba(44,36,48,.92); color:#fff; padding:8px 14px; border-radius:8px; font-size:12px; opacity:0; transition:.2s; pointer-events:none; }
+  .toast.show { opacity:1; }
+  .hint { font-size:11px; color:var(--muted); margin-top:4px; }
+</style>
+<style id="amo-skyblue-theme">
+  :root { --pink:#0ea5e9; --pink2:#38bdf8; --brand:#0ea5e9; }
+  html[data-theme="dark"] { --pink:#38bdf8; --pink2:#7dd3fc; }
+</style>
+</head>
+<body>
+<header>
+  <h1>我能永远记住你</h1>
+  <span class="badge" id="stat">读取中…</span>
+</header>
+
+<nav>
+  <button class="active" data-tab="relations">关系网</button>
+  <button data-tab="profiles">画像</button>
+  <button data-tab="persons">人物</button>
+  <button data-tab="chat">聊天</button>
+  <button data-tab="schedule">日程</button>
+  <button data-tab="logs">日志</button>
+  <button data-tab="backup">备份</button>
+</nav>
+
+<main>
+  <section class="panel" id="panel-profiles">
+    <div class="card">
+      <div class="row">
+        <input class="grow" id="search" placeholder="搜 uid / 称呼 / 备注">
+        <button class="ghost" id="btnReload">刷新</button>
+      </div>
+      <div class="hint">点一条进入编辑：改名字、称呼、关系，保存后立即写回库。</div>
+    </div>
+    <div class="list" id="profileList"></div>
+
+    <div class="card" id="editor" hidden>
+      <div class="row">
+        <strong class="grow" id="editorTitle">编辑画像</strong>
+        <button class="ghost" id="btnCloseEditor">关闭</button>
+      </div>
+      <label>UID</label>
+      <input id="fUid" readonly>
+      <label>名字</label>
+      <input id="fName" placeholder="她平时怎么叫他">
+      <label>别名（逗号分隔）</label>
+      <input id="fAlias" placeholder="老公,哥哥">
+      <label>关系</label>
+      <input id="fRelation" placeholder="相恋 / 熟识 / 普通 / 抵触 / 仇恨">
+      <label>备注</label>
+      <textarea id="fRemark" placeholder="特征、偏好、要注意的事"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="btnSaveProfile">保存</button>
+        <button class="ghost danger" id="btnDeleteProfile">删除这个人的全部数据</button>
+      </div>
+      <div class="hint">删除会连带清掉他的记忆、关系边和缓存，不可恢复。</div>
+    </div>
+
+    <div class="card" id="memories" hidden>
+      <div class="row">
+        <strong class="grow">记忆</strong>
+        <button class="ghost" id="btnRefreshMem">刷新</button>
+      </div>
+      <div id="memList"></div>
+      <label>新增一条记忆</label>
+      <div class="row">
+        <input class="grow" id="newMem" placeholder="例如：他养了一只叫团子的猫">
+        <button class="primary" id="btnAddMem">记住</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-persons">
+    <div class="card">
+      <div class="row">
+        <input class="grow" id="personSearch" placeholder="搜名字 / uid / 平台">
+        <button class="ghost" id="btnPersonReload">刷新</button>
+      </div>
+      <div class="hint">同一个人在 QQ 和飞书说了什么，都会并到这一条下面；名字一样会自动并，并错了点进去解绑。</div>
+    </div>
+    <div class="list" id="personList"></div>
+
+    <div class="card" id="personDetail" hidden>
+      <div class="row">
+        <strong class="grow" id="personTitle">人物</strong>
+        <button class="ghost" id="btnPersonClose">关闭</button>
+      </div>
+      <div id="personLinks" class="hint"></div>
+      <div class="row" style="margin-top:8px">
+        <select id="linkPlatform">
+          <option value="aiocqhttp">QQ</option>
+          <option value="lark">飞书</option>
+          <option value="telegram">Telegram</option>
+          <option value="discord">Discord</option>
+        </select>
+        <input class="grow" id="linkUid" placeholder="要绑进来的 uid（比如飞书那边的 id）">
+        <button class="ghost" id="btnPersonLink">绑定</button>
+      </div>
+      <div class="hint">他把另一个平台的账号告诉你时用这个绑一下，之后就并成同一个人了。</div>
+      <div class="row" style="margin-top:8px">
+        <input class="grow" id="mergePid" placeholder="要并进来的人物编号（pid）">
+        <button class="ghost" id="btnPersonMerge">并进来</button>
+      </div>
+      <div class="hint">合并后身份、聊天记录、记忆都归到当前这条，对方那条会被删掉。</div>
+      <div id="personRecent" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <section class="panel active" id="panel-relations">
+    <div class="card">
+      <div class="row">
+        <strong class="grow">关系图谱</strong>
+        <label class="hint" style="display:flex;align-items:center;gap:4px;margin:0;cursor:pointer">
+          <input type="checkbox" id="relAuto" checked style="width:auto;margin:0"> 自动旋转
+        </label>
+        <button class="ghost" id="btnRelReload">刷新</button>
+      </div>
+      <canvas id="relGraph" style="width:100%;height:min(440px,58vh);display:block;cursor:grab"></canvas>
+      <div class="hint" id="relLegend"></div>
+      <div class="hint">拖动旋转 · 滚轮缩放 · 双击回正；点节点查看详情，可在弹窗底部删除关系。</div>
+    </div>
+  </section>
+
+  <div class="modal" id="relNodeModal" hidden>
+    <div class="modal-card">
+      <div class="row" style="display:flex;align-items:center;gap:8px">
+        <div class="grow">
+          <div class="label" id="relNodeTitle">节点详情</div>
+          <div class="hint" id="relNodeSub"></div>
+        </div>
+        <button class="ghost" id="relNodeClose">关闭</button>
+      </div>
+      <div class="list" id="relNodeEdges" style="margin-top:10px"></div>
+      <button class="ghost danger rel-node-delete" id="relNodeDelete">删除选中的关系</button>
+    </div>
+  </div>
+
+  <section class="panel" id="panel-chat">
+    <div class="card">
+      <div class="row">
+        <input class="grow" id="chatUmo" placeholder="按会话筛选（可留空）">
+        <button class="ghost" id="btnChatReload">刷新</button>
+        <button class="ghost danger" id="btnChatClear">清空</button>
+      </div>
+      <div class="hint">原始记录保留 14 天；3 天前的会按天压成一条摘要（标「摘要」），到期后彻底删除。</div>
+    </div>
+    <div class="card"><div id="chatList" class="list"></div></div>
+  </section>
+
+  <section class="panel" id="panel-schedule">
+    <div class="card">
+      <div class="row">
+        <strong class="grow">日程 / 世界观缓存</strong>
+        <button class="ghost" id="btnSchedReload">刷新</button>
+      </div>
+      <div class="hint">跟随陪伴插件的日程保留策略；这里只看和删，不重建。</div>
+    </div>
+    <div class="list" id="schedList"></div>
+    <div class="card" id="schedView" hidden>
+      <div class="row">
+        <strong class="grow" id="schedTitle">内容</strong>
+        <button class="ghost" id="btnSchedClose">关闭</button>
+      </div>
+      <textarea id="schedBody" rows="14" readonly></textarea>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-backup">
+    <div class="card">
+      <div class="row">
+        <strong class="grow">记忆备份</strong>
+        <button id="btnBackupNow">立即备份</button>
+        <button class="ghost" id="btnBackupExport">导出 JSON</button>
+        <button class="ghost" id="btnBackupImport">导入 JSON</button>
+        <input type="file" id="backupFile" accept=".json,application/json" hidden>
+      </div>
+      <div class="hint">每天自动备份一次，保留最近 7 份，放在 plugin_data/Astr_Amo_data/backups/；恢复是合并语义，不会删现有记忆。</div>
+    </div>
+    <div class="card"><div id="backupList" class="list"></div></div>
+  </section>
+
+  <section class="panel" id="panel-logs">
+    <div class="card">
+      <div class="row">
+        <select id="logLevel" class="grow">
+          <option value="">全部级别</option>
+          <option value="info">info</option>
+          <option value="warning">warning</option>
+          <option value="error">error</option>
+        </select>
+        <button class="ghost" id="btnLogReload">刷新</button>
+        <button class="ghost danger" id="btnLogClear">清空</button>
+      </div>
+      <div class="hint">默认保留 7 天，到期自动删除。</div>
+    </div>
+    <div class="card"><div id="logList" class="list"></div></div>
+  </section>
+</main>
+
+
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PLUGIN = "Astr_Amo_data";
+const bases = [
+  "/api/v1/plugins/extensions/" + PLUGIN,
+  "/api/plug/" + PLUGIN,
+];
+let currentUid = "";
+let currentBot = "";
+
+function toast(msg, bad) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast show" + (bad ? " error" : "");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = "toast"; }, 2200);
+}
+
+function objectFrom(res) {
+  if (res && res.data && typeof res.data === "object" && !Array.isArray(res.data)) return res.data;
+  return res && typeof res === "object" ? res : {};
+}
+
+function officialBridge() {
+  if (!window.parent || window.parent === window) return null;
+  const candidates = [];
+  try { candidates.push(window.AstrBotPluginView, window.AstrBotPluginPage); } catch (error) {}
+  try { candidates.push(window.parent.AstrBotPluginView, window.parent.AstrBotPluginPage); } catch (error) {}
+  try { candidates.push(window.top.AstrBotPluginView, window.top.AstrBotPluginPage); } catch (error) {}
+  return candidates.find((item) => item && typeof item.apiGet === "function") || null;
+}
+
+function createInlineBridge() {
+  if (!window.parent || window.parent === window) return null;
+  const pending = new Map();
+  let counter = 0;
+  let readyResolver = null;
+  const readyPromise = new Promise((resolve) => { readyResolver = resolve; });
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.channel !== "astrbot-plugin-page") return;
+    if (message.kind === "context") {
+      if (readyResolver) { readyResolver(message.context || {}); readyResolver = null; }
+      return;
+    }
+    if (message.kind !== "response") return;
+    const item = pending.get(message.requestId);
+    if (!item) return;
+    pending.delete(message.requestId);
+    if (message.ok) item.resolve(message.data);
+    else item.reject(new Error(message.error || "插件桥接请求失败"));
+  });
+  function request(action, payload) {
+    return new Promise((resolve, reject) => {
+      const requestId = "amo_data_req_" + (++counter);
+      const timer = setTimeout(() => {
+        if (pending.delete(requestId)) reject(new Error("插件桥接超时"));
+      }, 30000);
+      pending.set(requestId, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+      });
+      try {
+        window.parent.postMessage({
+          channel: "astrbot-plugin-page",
+          kind: "request",
+          requestId,
+          action,
+          ...(payload || {}),
+        }, "*");
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(requestId);
+        reject(error);
+      }
+    });
+  }
+  try { window.parent.postMessage({ channel: "astrbot-plugin-page", kind: "ready" }, "*"); } catch (error) {}
+  return {
+    apiGet: (endpoint, params) => request("api:get", { endpoint, params }),
+    apiPost: (endpoint, body) => request("api:post", { endpoint, body }),
+    ready: () => readyPromise,
+  };
+}
+
+const inlineBridge = createInlineBridge();
+
+function bridge() {
+  return officialBridge() || inlineBridge;
+}
+
+const WRITE_ACTIONS = new Set([
+  "profile/save", "profile/delete", "memory/save", "memory/delete",
+  "person/link", "person/unlink", "person/merge",
+  "relation/save", "relation/delete", "message/delete", "message/clear",
+  "log/delete", "log/clear", "schedule/delete", "maintenance",
+]);
+
+async function bridgeCall(action, payload) {
+  const b = bridge();
+  if (!b) return { __error: "没有页面桥接" };
+  try {
+    const attempt = payload && typeof b.apiPost === "function"
+      ? b.apiPost(action, payload)
+      : b.apiGet(action, payload || {});
+    let result = await attempt;
+    if (result && typeof result.json === "function") result = await result.json();
+    if (typeof result === "string") {
+      try { result = JSON.parse(result); } catch (error) {}
+    }
+    if (result && typeof result === "object") {
+      // 后端用 code:1 表示业务失败；以前只把 >=400 当错误，解绑/绑定/备份失败照样 toast「已完成」。
+      if (typeof result.code === "number" && result.code !== 0) {
+        return { __error: result.msg || ("错误码 " + result.code) };
+      }
+      if (result.status === "error") {
+        return { __error: result.message || "接口返回错误" };
+      }
+      return result;
+    }
+    return { __error: "接口返回格式异常" };
+  } catch (error) {
+    return { __error: error.message || String(error) };
+  }
+}
+
+async function httpCall(action, payload) {
+  const errors = [];
+  const headers = {};
+  if (payload) headers["Content-Type"] = "application/json";
+  try {
+    for (const key of ["token", "astrbot_token", "access_token", "dashboard_token"]) {
+      const value = window.localStorage.getItem(key);
+      if (value) { headers["Authorization"] = "Bearer " + value; break; }
+    }
+  } catch (error) {}
+  for (const base of bases) {
+    const url = base + "/" + action.replace(/^\/+/, "");
+    try {
+      const response = await fetch(url, {
+        method: payload ? "POST" : "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers,
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      const text = await response.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (error) { data = null; }
+      if (data && (data.code === 0 || data.data !== undefined || data.status === "ok")) return data;
+      if (data && (data.message || data.msg)) errors.push(data.message || data.msg);
+      else errors.push("HTTP " + response.status);
+    } catch (error) {
+      errors.push(error.message || String(error));
+    }
+  }
+  throw new Error(errors[0] || "无法连接插件接口");
+}
+
+function withTimeout(promise, ms, label) {
+  let timer = null;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error((label || "接口") + " 超时")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function call(action, payload) {
+  const body = (payload === undefined || payload === null)
+    ? (WRITE_ACTIONS.has(action) ? {} : payload)
+    : payload;
+  let bridged = null;
+  try {
+    bridged = await withTimeout(bridgeCall(action, body), 8000, action);
+  } catch (error) {
+    bridged = { __error: error.message };
+  }
+  if (bridged && !bridged.__error) return bridged;
+  if (WRITE_ACTIONS.has(action) && bridged && /超时/.test(String(bridged.__error))) {
+    // 桥接超时但后端可能已经执行完；再 fetch 重发会让同一个写操作执行两次
+    throw new Error("结果未知（" + action + " 超时），请刷新确认");
+  }
+  try {
+    return await withTimeout(httpCall(action, body), 15000, action);
+  } catch (error) {
+    throw new Error((bridged && bridged.__error) || error.message || "接口未就绪");
+  }
+}
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(Number(ts) * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate())
+    + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + btn.dataset.tab));
+    const tab = btn.dataset.tab;
+    if (tab === "persons") loadPersons();
+    if (tab === "relations") loadRelations();
+    if (tab === "chat") loadChat();
+    if (tab === "schedule") loadSchedule();
+    if (tab === "logs") loadLogs();
+    if (tab === "backup") loadBackups();
+  });
+});
+
+async function loadStatus() {
+  try {
+    const data = objectFrom(await call("status")) || {};
+    const counts = data.counts || {};
+    document.getElementById("stat").textContent =
+      "画像 " + (counts.profiles || 0) + " · 记忆 " + (counts.memories || 0) +
+      " · 关系 " + (counts.relations || 0) + " · 聊天 " + (counts.messages || 0) +
+      " · v" + (data.version || "");
+  } catch (error) {
+    document.getElementById("stat").textContent = "后端未就绪";
+  }
+}
+
+/* ---------- 画像 ---------- */
+async function loadProfiles() {
+  const box = document.getElementById("profileList");
+  box.textContent = "读取中…";
+  try {
+    const keyword = (document.getElementById("search").value || "").trim();
+    const data = objectFrom(await call("profiles", keyword ? { keyword } : undefined)) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有画像。</div>'; return; }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "item";
+      const left = document.createElement("div");
+      left.className = "grow";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = item.name || item.alias || item.uid;
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = "UID " + item.uid + (item.relation ? " · " + item.relation : "") + (item.remark ? " · " + item.remark : "");
+      left.appendChild(name); left.appendChild(sub);
+      row.appendChild(left);
+      row.addEventListener("click", () => openProfile(item.uid));
+      box.appendChild(row);
+    });
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+
+async function openProfile(uid) {
+  currentUid = uid;
+  try {
+    const data = objectFrom(await call("profile", { uid })) || {};
+    const p = data.profile || {};
+    currentBot = data.bot_id || "";
+    document.getElementById("editor").hidden = false;
+    document.getElementById("editorTitle").textContent = "编辑画像 · " + (p.name || uid);
+    document.getElementById("fUid").value = uid;
+    document.getElementById("fName").value = p.name || "";
+    document.getElementById("fAlias").value = p.alias || "";
+    document.getElementById("fRelation").value = p.relation || "";
+    document.getElementById("fRemark").value = p.remark || "";
+    document.getElementById("memories").hidden = false;
+    renderMemories(data.memories || []);
+  } catch (error) {
+    toast("读取失败：" + error.message, true);
+  }
+}
+
+function renderMemories(items) {
+  const box = document.getElementById("memList");
+  box.textContent = "";
+  if (!items.length) { box.innerHTML = '<div class="empty">还没有记忆。</div>'; return; }
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "mem";
+    row.style.cssText = "display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)";
+    const txt = document.createElement("div");
+    txt.style.flex = "1";
+    txt.textContent = item.content;
+    const meta = document.createElement("div");
+    meta.className = "sub";
+    meta.textContent = (item.kind || "fact") + " · " + Number(item.importance || 0).toFixed(2);
+    const del = document.createElement("button");
+    del.className = "ghost";
+    del.textContent = "删";
+    del.addEventListener("click", async () => {
+      try {
+        await call("memory/delete", { id: item.id });
+        toast("已删除");
+        openProfile(currentUid);
+        loadStatus();
+      } catch (error) { toast("删除失败：" + error.message, true); }
+    });
+    row.appendChild(txt); row.appendChild(meta); row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+
+document.getElementById("btnSaveProfile").addEventListener("click", async () => {
+  try {
+    await call("profile/save", {
+      uid: currentUid,
+      bot_id: currentBot,
+      name: document.getElementById("fName").value,
+      alias: document.getElementById("fAlias").value,
+      relation: document.getElementById("fRelation").value,
+      remark: document.getElementById("fRemark").value,
+    });
+    toast("已保存");
+    loadProfiles();
+    loadStatus();
+  } catch (error) { toast("保存失败：" + error.message, true); }
+});
+
+document.getElementById("btnDeleteProfile").addEventListener("click", async () => {
+  if (!currentUid) return;
+  if (!window.confirm("删除 " + currentUid + " 的画像、记忆、关系边？不可恢复。")) return;
+  try {
+    await call("profile/delete", { uid: currentUid, bot_id: currentBot, confirm: 1 });
+    toast("已删除");
+    document.getElementById("editor").hidden = true;
+    document.getElementById("memories").hidden = true;
+    currentUid = "";
+    loadProfiles();
+    loadStatus();
+  } catch (error) { toast("删除失败：" + error.message, true); }
+});
+
+document.getElementById("btnCloseEditor").addEventListener("click", () => {
+  document.getElementById("editor").hidden = true;
+  document.getElementById("memories").hidden = true;
+});
+
+document.getElementById("btnAddMem").addEventListener("click", async () => {
+  const content = (document.getElementById("newMem").value || "").trim();
+  if (!content || !currentUid) { toast("先选个人再写内容", true); return; }
+  try {
+    await call("memory/save", { uid: currentUid, content, kind: "manual", importance: 0.6 });
+    document.getElementById("newMem").value = "";
+    toast("已记住");
+    openProfile(currentUid);
+    loadStatus();
+  } catch (error) { toast("写入失败：" + error.message, true); }
+});
+
+document.getElementById("btnRefreshMem").addEventListener("click", () => currentUid && openProfile(currentUid));
+document.getElementById("btnReload").addEventListener("click", loadProfiles);
+document.getElementById("search").addEventListener("input", () => {
+  clearTimeout(window._st);
+  window._st = setTimeout(loadProfiles, 250);
+});
+
+/* ---------- 人物（跨平台合并） ---------- */
+let currentPid = 0;
+
+function platformChips(links) {
+  const wrap = document.createElement("span");
+  wrap.className = "badge";
+  const labels = (links || []).map((item) => item.label || item.platform || "未知");
+  wrap.textContent = labels.length ? labels.join(" / ") : "未绑定";
+  return wrap;
+}
+
+async function loadPersons() {
+  const box = document.getElementById("personList");
+  box.textContent = "读取中…";
+  try {
+    const keyword = (document.getElementById("personSearch").value || "").trim();
+    const data = objectFrom(await call("persons", keyword ? { keyword } : undefined)) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有人物记录，等对方在 QQ 或飞书上说句话就会自动建。</div>'; return; }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "item";
+      const left = document.createElement("div");
+      left.className = "grow";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = (item.name || "未命名") + " · pid " + item.pid;
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      const ids = (item.links || []).map((link) => (link.label || link.platform) + " " + link.uid);
+      sub.textContent = (ids.join(" ｜ ") || "未绑定身份") + " · 消息 " + (item.msg_count || 0);
+      left.appendChild(name); left.appendChild(sub);
+      row.appendChild(left);
+      row.appendChild(platformChips(item.links));
+      row.addEventListener("click", () => openPerson(item.pid));
+      box.appendChild(row);
+    });
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+
+async function openPerson(pid) {
+  currentPid = pid;
+  try {
+    const data = objectFrom(await call("person", { pid })) || {};
+    const card = document.getElementById("personDetail");
+    card.hidden = false;
+    document.getElementById("personTitle").textContent =
+      (data.name || "未命名") + " · pid " + data.pid + " · 消息 " + (data.msg_count || 0);
+    const linkBox = document.getElementById("personLinks");
+    linkBox.textContent = "";
+    (data.links || []).forEach((link) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.style.marginTop = "6px";
+      const text = document.createElement("span");
+      text.className = "grow";
+      text.textContent = (link.label || link.platform) + " · " + link.uid + (link.name ? " · " + link.name : "");
+      const unbind = document.createElement("button");
+      unbind.className = "ghost danger";
+      unbind.textContent = "解绑";
+      unbind.addEventListener("click", async () => {
+        if (!confirm("解绑后它单独算一个人，聊天记录不会删。继续？")) return;
+        try {
+          await call("person/unlink", { platform: link.platform, uid: link.uid });
+          toast("已解绑");
+          openPerson(pid);
+          loadPersons();
+        } catch (error) {
+          toast("解绑失败：" + error.message, true);
+        }
+      });
+      row.appendChild(text); row.appendChild(unbind);
+      linkBox.appendChild(row);
+    });
+    const recentBox = document.getElementById("personRecent");
+    recentBox.textContent = "";
+    const messages = (data.recent || []);
+    if (!messages.length) {
+      recentBox.innerHTML = '<div class="empty">还没有共同聊天记录。</div>';
+      return;
+    }
+    messages.slice().reverse().forEach((msg) => {
+      const line = document.createElement("div");
+      line.className = "msg";
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = (msg.label || msg.platform || "") + (msg.role === "bot" ? " · 她" : " · " + (msg.name || msg.uid));
+      const txt = document.createElement("div");
+      txt.className = "txt";
+      txt.textContent = msg.content;
+      const time = document.createElement("div");
+      time.className = "time";
+      time.textContent = fmtTime(msg.created_at);
+      line.appendChild(who); line.appendChild(txt); line.appendChild(time);
+      recentBox.appendChild(line);
+    });
+  } catch (error) {
+    toast("读取失败：" + error.message, true);
+  }
+}
+
+document.getElementById("btnPersonReload").addEventListener("click", loadPersons);
+document.getElementById("personSearch").addEventListener("input", () => {
+  clearTimeout(window._pt);
+  window._pt = setTimeout(loadPersons, 250);
+});
+document.getElementById("btnPersonClose").addEventListener("click", () => {
+  document.getElementById("personDetail").hidden = true;
+});
+document.getElementById("btnPersonLink").addEventListener("click", async () => {
+  const platform = document.getElementById("linkPlatform").value;
+  const uid = (document.getElementById("linkUid").value || "").trim();
+  if (!currentPid) { toast("先在上面点一个人", true); return; }
+  if (!uid) { toast("填一下要绑定的 uid", true); return; }
+  try {
+    await call("person/link", { platform: platform, uid: uid, pid: currentPid });
+    toast("已绑定");
+    document.getElementById("linkUid").value = "";
+    openPerson(currentPid);
+    loadPersons();
+  } catch (error) {
+    toast("绑定失败：" + error.message, true);
+  }
+});
+
+document.getElementById("btnPersonMerge").addEventListener("click", async () => {
+  const dropPid = parseInt(document.getElementById("mergePid").value || "0", 10);
+  if (!currentPid || !dropPid) { toast("先在上面点一个人，再填要并进来的 pid", true); return; }
+  if (dropPid === currentPid) { toast("不能并到自己", true); return; }
+  if (!confirm("合并后对方那条会被删掉，身份和记录都并到当前这条。继续？")) return;
+  try {
+    const result = await call("person/merge", { keep_pid: currentPid, drop_pid: dropPid });
+    toast(result.msg || "已合并");
+    document.getElementById("mergePid").value = "";
+    openPerson(currentPid);
+    loadPersons();
+  } catch (error) {
+    toast("合并失败：" + error.message, true);
+  }
+});
+
+/* ---------- 关系图谱（3D 神经元球，纯 canvas，无外部依赖） ----------
+   和「我想永远陪伴你」的陪伴面板同一套渲染：球面撒点 + 3D 力导向 + 透视投影，
+   拖动旋转、滚轮缩放、双击回正，远的线淡、近的线亮，节点带辉光。
+   这里只是只读展示，增删改仍在陪伴面板里做。 */
+const REL_COLORS = {
+  家人: "#d98c8c", 恋人: "#e06a9a", 朋友: "#7aa8e0", 同事: "#6fc0a8",
+  同学: "#c9a24d", 熟人: "#9b8fd0", 陌生人: "#9aa0a6", 仇人: "#c0504d",
+};
+const REL_GLOW = {
+  家人: "#ffb86b", 恋人: "#ff5fa2", 朋友: "#7fd1ff", 同事: "#72e0c4",
+  同学: "#ffd166", 熟人: "#c9a7ff", 陌生人: "#9aa6c9", 仇人: "#ff6b6b",
+};
+const REL_RANK = { 家人: 5, 恋人: 6, 朋友: 4, 同事: 3, 同学: 3, 熟人: 2, 陌生人: 1, 仇人: 4 };
+let graphState = null;
+let relGraphRaf = 0;
+let relHoverId = "";
+let relItems = [];
+let relSelectedEdge = null;
+const relCamera = { yaw: 0.35, pitch: -0.2, roll: 0, distance: 0, auto: true };
+
+function relColor(relation) {
+  return REL_COLORS[relation] || "#9aa0a6";
+}
+
+function relGlowColor(relation) {
+  return REL_GLOW[relation] || "#b8c2ff";
+}
+
+function drawStarfield(ctx, width, height, now) {
+  // 深空底色：偏冷的天顶 + 更暗的地平线
+  const base = ctx.createLinearGradient(0, 0, width, height);
+  base.addColorStop(0, "#070512");
+  base.addColorStop(0.45, "#0b0920");
+  base.addColorStop(1, "#04030b");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, width, height);
+
+  // 斜向银河带：柔和的亮带，而不是两个圆形星云
+  ctx.save();
+  ctx.translate(width * 0.52, height * 0.5);
+  ctx.rotate(-0.48);
+  const band = ctx.createLinearGradient(0, -height * 0.24, 0, height * 0.24);
+  band.addColorStop(0, "rgba(80,70,150,0)");
+  band.addColorStop(0.32, "rgba(110,96,180,0.10)");
+  band.addColorStop(0.5, "rgba(205,186,255,0.16)");
+  band.addColorStop(0.68, "rgba(90,130,190,0.10)");
+  band.addColorStop(1, "rgba(50,50,110,0)");
+  ctx.fillStyle = band;
+  ctx.fillRect(-width, -height * 0.24, width * 2, height * 0.48);
+  ctx.restore();
+
+  // 超低透明度星云叠层，避免出现明显圆斑
+  [[0.30, 0.30, "#7b5cff", 0.055], [0.72, 0.68, "#3a8fd0", 0.045], [0.5, 0.5, "#ff7fc0", 0.03]].forEach(([rx, ry, color, alpha]) => {
+    const neb = ctx.createRadialGradient(width * rx, height * ry, 2, width * rx, height * ry, Math.max(width, height) * 0.62);
+    neb.addColorStop(0, color);
+    neb.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = neb;
+    ctx.fillRect(0, 0, width, height);
+  });
+  ctx.globalAlpha = 1;
+
+  const rand = (seed) => {
+    const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+    return value - Math.floor(value);
+  };
+  ctx.globalCompositeOperation = "lighter";
+  const star = (x, y, radius, color, alpha, flare) => {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    if (flare) {
+      ctx.globalAlpha = alpha * 0.45;
+      ctx.fillRect(x - radius * 4, y - 0.4, radius * 8, 0.8);
+      ctx.fillRect(x - 0.4, y - radius * 4, 0.8, radius * 8);
+    }
+  };
+
+  // 远景小星
+  for (let i = 0; i < 260; i += 1) {
+    const x = rand(i + 1) * width;
+    const y = rand(i + 1000) * height;
+    const radius = 0.35 + rand(i + 2000) * 0.65;
+    const twinkle = 0.28 + 0.5 * Math.abs(Math.sin(now / 1500 + i * 1.7));
+    const color = i % 9 === 0 ? "#ffd9f0" : (i % 6 === 0 ? "#bcd8ff" : "#ffffff");
+    star(x, y, radius, color, twinkle, false);
+  }
+  // 中景星
+  for (let i = 0; i < 70; i += 1) {
+    const x = rand(i + 3000) * width;
+    const y = rand(i + 4000) * height;
+    const radius = 0.8 + rand(i + 5000) * 0.8;
+    const twinkle = 0.45 + 0.5 * Math.abs(Math.sin(now / 1200 + i * 2.1));
+    star(x, y, radius, i % 5 === 0 ? "#cfe4ff" : "#ffffff", twinkle, false);
+  }
+  // 银河带里的密集星点
+  for (let i = 0; i < 95; i += 1) {
+    const t = rand(i + 6000);
+    const offset = (rand(i + 7000) - 0.5) * height * 0.16;
+    const x = t * width;
+    const y = height * 0.72 - t * height * 0.44 + offset;
+    const radius = 0.4 + rand(i + 8000) * 0.7;
+    const twinkle = 0.3 + 0.5 * Math.abs(Math.sin(now / 1300 + i));
+    star(x, y, radius, "#e9e4ff", twinkle, false);
+  }
+  // 少量亮星，带十字星芒
+  for (let i = 0; i < 14; i += 1) {
+    const x = rand(i + 9000) * width;
+    const y = rand(i + 9500) * height;
+    const radius = 1.1 + rand(i + 9900) * 1.1;
+    const twinkle = 0.55 + 0.45 * Math.abs(Math.sin(now / 1700 + i * 2.3));
+    star(x, y, radius, i % 3 === 0 ? "#ffe4f2" : "#ffffff", twinkle, i % 2 === 0);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+}
+
+function relThemeColor() {
+  const style = getComputedStyle(document.body);
+  return (style.getPropertyValue("--text") || "#2c2430").trim() || "#2c2430";
+}
+
+function buildGraph(items) {
+  const nodes = new Map();
+  const edges = [];
+  items.forEach((edge) => {
+    const a = String(edge.a_uid || "");
+    const b = String(edge.b_uid || "");
+    if (!a || !b) return;
+    if (!nodes.has(a)) nodes.set(a, { id: a, name: edge.a_name || a, relation: "", degree: 0 });
+    if (!nodes.has(b)) nodes.set(b, { id: b, name: edge.b_name || b, relation: "", degree: 0 });
+    const relation = edge.relation || "朋友";
+    edges.push({ a, b, relation });
+    const rank = REL_RANK[relation] || 3;
+    [a, b].forEach((id) => {
+      const node = nodes.get(id);
+      node.degree += 1;
+      if (rank > (REL_RANK[node.relation] || 0)) node.relation = relation;
+    });
+  });
+  // 球面均匀撒点（黄金角），先长成一团，再交给 3D 力导向
+  const list = [...nodes.values()];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const shell = 70 + Math.min(110, list.length * 1.1);
+  list.forEach((node, index) => {
+    const y = 1 - (index / Math.max(1, list.length - 1)) * 2;
+    const ring = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = golden * index;
+    node.x = Math.cos(theta) * ring * shell;
+    node.y = y * shell;
+    node.z = Math.sin(theta) * ring * shell;
+    node.vx = 0; node.vy = 0; node.vz = 0;
+  });
+  return { nodes: list, edges, index: nodes, radius: shell };
+}
+
+/* 两两斥力是 O(n²)，而且这段跑在主线程上：节点一多，打开关系页会直接卡住。
+   PAIR_BUDGET 是「一轮最多算多少对」的预算，超了就按步长抽样——布局会糙一点，
+   但不会把面板冻住（200 节点以内仍然是全量对算，行为不变）。 */
+const SETTLE_PAIR_BUDGET = 120000;
+
+function settleGraph(graph, iterations) {
+  const nodes = graph.nodes;
+  const count = nodes.length;
+  const pairs = (count * (count - 1)) / 2;
+  // 抽样按「每隔 stride 个节点算一次」，所以对数约除以 stride：stride = pairs / 预算
+  const stride = pairs > SETTLE_PAIR_BUDGET ? Math.ceil(pairs / SETTLE_PAIR_BUDGET) : 1;
+  for (let step = 0; step < iterations; step += 1) {
+    for (let i = 0; i < count; i += 1) {
+      const a = nodes[i];
+      for (let j = i + 1; j < count; j += stride) {
+        const b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+        const dist2 = dx * dx + dy * dy + dz * dz || 0.01;
+        const dist = Math.sqrt(dist2);
+        const force = Math.min(700, 900 / dist2);
+        dx /= dist; dy /= dist; dz /= dist;
+        a.vx += dx * force; a.vy += dy * force; a.vz += dz * force;
+        b.vx -= dx * force; b.vy -= dy * force; b.vz -= dz * force;
+      }
+    }
+    graph.edges.forEach((edge) => {
+      const a = graph.index.get(edge.a), b = graph.index.get(edge.b);
+      if (!a || !b) return;
+      let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.01;
+      const force = (dist - 52) * 0.05;
+      dx /= dist; dy /= dist; dz /= dist;
+      a.vx += dx * force; a.vy += dy * force; a.vz += dz * force;
+      b.vx -= dx * force; b.vy -= dy * force; b.vz -= dz * force;
+    });
+    for (let i = 0; i < count; i += 1) {
+      const node = nodes[i];
+      node.vx -= node.x * 0.02; node.vy -= node.y * 0.02; node.vz -= node.z * 0.02;
+      node.vx *= 0.5; node.vy *= 0.5; node.vz *= 0.5;
+      node.x += node.vx; node.y += node.vy; node.z += node.vz;
+    }
+  }
+}
+
+function normalizeGraph(graph, radius) {
+  let maxR = 0;
+  graph.nodes.forEach((node) => { maxR = Math.max(maxR, Math.hypot(node.x, node.y, node.z)); });
+  if (maxR > 0.01) {
+    const target = Math.max(40, Number(radius) || 120);
+    const scale = target / maxR;
+    graph.nodes.forEach((node) => { node.x *= scale; node.y *= scale; node.z *= scale; });
+  }
+}
+
+function projectGraph(graph, camera, width, height) {
+  const cosY = Math.cos(camera.yaw), sinY = Math.sin(camera.yaw);
+  const cosP = Math.cos(camera.pitch), sinP = Math.sin(camera.pitch);
+  const focus = 760;
+  const center = focus + camera.distance;
+  graph.nodes.forEach((node) => {
+    const x1 = node.x * cosY - node.z * sinY;
+    const z1 = node.x * sinY + node.z * cosY;
+    const y1 = node.y * cosP - z1 * sinP;
+    const z2 = node.y * sinP + z1 * cosP;
+    const t = focus / Math.max(180, center + z2);
+    node.px = width / 2 + x1 * t;
+    node.py = height / 2 + y1 * t;
+    node.pscale = t;
+    node.pdepth = z2;
+  });
+  // 屏幕空间轻微滚转：只有两个节点上下排列时，单靠 yaw 看不出在转
+  const roll = camera.roll || 0;
+  if (Math.abs(roll) > 0.0001) {
+    const cosR = Math.cos(roll), sinR = Math.sin(roll);
+    graph.nodes.forEach((node) => {
+      const dx = node.px - width / 2, dy = node.py - height / 2;
+      node.px = width / 2 + dx * cosR - dy * sinR;
+      node.py = height / 2 + dx * sinR + dy * cosR;
+    });
+  }
+}
+
+function drawGraph(ctx, graph, width, height, camera, hoverId, labelColor, now) {
+  drawStarfield(ctx, width, height, now || 0);
+
+  projectGraph(graph, camera, width, height);
+  const activeId = hoverId || window.__graphActive || "";
+  const ordered = graph.nodes.slice().sort((a, b) => b.pdepth - a.pdepth);
+
+  // 远的线更淡、近的更亮；高亮时加同色辉光
+  graph.edges.forEach((edge) => {
+    const a = graph.index.get(edge.a), b = graph.index.get(edge.b);
+    if (!a || !b) return;
+    const depth = (a.pdepth + b.pdepth) / 2;
+    const near = activeId && (edge.a === activeId || edge.b === activeId);
+    const base = 0.18 + 0.38 * (1 - Math.min(1, Math.max(0, (depth + 180) / 360)));
+    const color = relGlowColor(edge.relation);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = near ? 12 : 4;
+    ctx.globalAlpha = near ? 0.8 : Math.min(0.55, base);
+    ctx.lineWidth = near ? 1.9 : 0.9;
+    ctx.beginPath();
+    ctx.moveTo(a.px, a.py);
+    ctx.lineTo(b.px, b.py);
+    ctx.stroke();
+    ctx.restore();
+  });
+  ctx.globalAlpha = 1;
+
+  // 节点：柔光小点，不再是刺眼的粉色大球
+  ordered.forEach((node) => {
+    const active = node.id === activeId;
+    const scale = Math.max(0.45, node.pscale);
+    const radius = (active ? 8.5 : node.id === "bot" ? 7 : 5) * scale;
+    const color = node.id === "bot" ? "#ff7fb5" : relGlowColor(node.relation);
+    const glow = ctx.createRadialGradient(node.px, node.py, 0, node.px, node.py, radius * 3.2);
+    glow.addColorStop(0, color);
+    glow.addColorStop(0.4, color);
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = active ? 0.45 : 0.28;
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(node.px, node.py, radius * 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = active ? 14 : 8;
+    ctx.beginPath();
+    ctx.fillStyle = active ? "#ffe3ee" : "#fff8fc";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = active ? 2 : 1.2;
+    ctx.arc(node.px, node.py, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = active ? 0.45 : 0.28;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(node.px, node.py, radius + 3 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  });
+
+  // 标签只给关键的：bot、悬停的、以及关系最近 / 连接最多的十几个，避免糊成一团
+  const labelNodes = ordered.filter((node) => node.id === "bot" || node.id === activeId)
+    .concat(ordered.filter((node) => node.id !== "bot" && node.id !== activeId)
+      .sort((a, b) => (REL_RANK[b.relation] || 0) - (REL_RANK[a.relation] || 0) || b.degree - a.degree)
+      .slice(0, 12));
+  ctx.font = "11px system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "center";
+  labelNodes.forEach((node) => {
+    const label = node.name.length > 8 ? node.name.slice(0, 8) + "…" : node.name;
+    ctx.globalAlpha = node.id === activeId || node.id === "bot" ? 1 : 0.85;
+    ctx.shadowColor = "rgba(0,0,0,0.85)";
+    ctx.shadowBlur = 5;
+    ctx.fillStyle = "#f6efff";
+    ctx.fillText(label, node.px, node.py + 18 * Math.max(0.6, node.pscale));
+    ctx.shadowBlur = 0;
+  });
+  ctx.globalAlpha = 1;
+}
+
+function renderGraph(items) {
+  const canvas = document.getElementById("relGraph");
+  if (!canvas) return;
+  if (relGraphRaf) { cancelAnimationFrame(relGraphRaf); relGraphRaf = 0; }
+  const ctx = canvas.getContext("2d");
+  const legend = document.getElementById("relLegend");
+  const panel = document.getElementById("panel-relations");
+  const graph = buildGraph(items || []);
+  graphState = graph;
+  relHoverId = "";
+  const autoBox = document.getElementById("relAuto");
+  relCamera.auto = autoBox ? !!autoBox.checked : true;
+
+  const empty = (message) => {
+    const width = Math.max(1, canvas.clientWidth || 320);
+    const height = Math.max(1, canvas.clientHeight || 340);
+    canvas.width = Math.round(width * (window.devicePixelRatio || 1));
+    canvas.height = Math.round(height * (window.devicePixelRatio || 1));
+    const scale = window.devicePixelRatio || 1;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#cbbfe0";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(message, width / 2, height / 2);
+    if (legend) legend.textContent = "";
+  };
+
+  if (!graph.nodes.length) {
+    empty("还没有关系，先加一条或让陪伴自己记");
+    return;
+  }
+
+  // 节点多的时候少跑几轮，打开面板别卡住
+  const iterations = graph.nodes.length > 400 ? 40 : (graph.nodes.length > 220 ? 90 : 180);
+  settleGraph(graph, iterations);
+
+  if (legend) {
+    const kinds = [...new Set(graph.edges.map((edge) => edge.relation))];
+    legend.textContent = "";
+    kinds.forEach((kind) => {
+      const span = document.createElement("span");
+      span.style.cssText = "display:inline-block;margin-right:10px";
+      const dot = document.createElement("i");
+      dot.style.cssText = "display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:" +
+        String(relColor(kind) || "transparent");
+      span.appendChild(dot);
+      span.appendChild(document.createTextNode(String(kind)));
+      legend.appendChild(span);
+    });
+  }
+
+  let width = 0, height = 0, dpr = 1;
+  const fit = () => {
+    const w = canvas.clientWidth || (canvas.parentElement ? canvas.parentElement.clientWidth - 24 : 320);
+    const h = canvas.clientHeight || 340;
+    dpr = window.devicePixelRatio || 1;
+    if (w !== width || h !== height) {
+      width = w; height = h;
+      canvas.width = Math.max(1, Math.round(w * dpr));
+      canvas.height = Math.max(1, Math.round(h * dpr));
+      // 按画布实际大小定球半径，手机窄屏也不会顶出边框
+      normalizeGraph(graph, Math.min(w, h) * 0.34);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+
+  let lastDraw = 0;
+  const labelColor = relThemeColor();
+  const frame = (now) => {
+    if (!canvas.isConnected) { relGraphRaf = 0; return; }
+    // 面板没显示时不动 CPU
+    if (panel && !panel.classList.contains("active")) {
+      relGraphRaf = requestAnimationFrame(frame);
+      return;
+    }
+    fit();
+    if (width <= 0) { relGraphRaf = requestAnimationFrame(frame); return; }
+    if (relCamera.auto && !canvas.__relDragging) {
+      relCamera.yaw += 0.0016;
+      relCamera.roll = 0.16 * Math.sin(now / 4200);
+    }
+    if (!lastDraw || now - lastDraw >= 32) {
+      lastDraw = now;
+      drawGraph(ctx, graph, width, height, relCamera, relHoverId, labelColor, now);
+    }
+    relGraphRaf = requestAnimationFrame(frame);
+  };
+
+  // 拖动 = 旋转整团神经网；滚轮缩放；双击回正
+  canvas.style.touchAction = "none";
+  canvas.style.cursor = "grab";
+  canvas.__relDragging = false;
+  let lastX = 0, lastY = 0;
+  const pick = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (event.clientX - rect.left) * (width / Math.max(1, rect.width));
+    const my = (event.clientY - rect.top) * (height / Math.max(1, rect.height));
+    let best = null, bestDist = 20;
+    graph.nodes.forEach((node) => {
+      const dist = Math.hypot(node.px - mx, node.py - my);
+      if (dist < bestDist) { bestDist = dist; best = node; }
+    });
+    return best;
+  };
+  canvas.onpointerdown = (event) => {
+    event.preventDefault();
+    if (canvas.__relIdle) clearTimeout(canvas.__relIdle);
+    canvas.__relDragging = true;
+    canvas.__relMoved = 0;
+    canvas.style.cursor = "grabbing";
+    relCamera.auto = false;
+    lastX = event.clientX; lastY = event.clientY;
+    try { canvas.setPointerCapture(event.pointerId); } catch (err) {}
+  };
+  canvas.onpointermove = (event) => {
+    if (canvas.__relDragging) {
+      canvas.__relMoved = (canvas.__relMoved || 0) + Math.abs(event.clientX - lastX) + Math.abs(event.clientY - lastY);
+      relCamera.yaw += (event.clientX - lastX) * 0.009;
+      relCamera.pitch += (event.clientY - lastY) * 0.007;
+      relCamera.pitch = Math.max(-1.25, Math.min(1.25, relCamera.pitch));
+      lastX = event.clientX; lastY = event.clientY;
+      return;
+    }
+    const hit = pick(event);
+    relHoverId = hit ? hit.id : "";
+    canvas.style.cursor = hit ? "pointer" : "grab";
+  };
+  const endDrag = (event) => {
+    if (!canvas.__relDragging) return;
+    canvas.__relDragging = false;
+    canvas.style.cursor = "grab";
+    // 只是点了一下（几乎没移动）= 选中这个节点，和以前的 2D 版一致
+    if (event && (canvas.__relMoved || 0) < 4) {
+      const hit = pick(event);
+      window.__graphActive = hit ? hit.id : "";
+      if (hit) openRelNode(hit.id);
+    }
+    canvas.__relIdle = setTimeout(() => {
+      const box = document.getElementById("relAuto");
+      relCamera.auto = box ? !!box.checked : true;
+    }, 1800);
+  };
+  canvas.onpointerup = endDrag;
+  canvas.onpointercancel = endDrag;
+  canvas.onpointerleave = () => { relHoverId = ""; };
+  canvas.onwheel = (event) => {
+    event.preventDefault();
+    relCamera.distance = Math.max(-220, Math.min(500, relCamera.distance + event.deltaY * 0.4));
+  };
+  canvas.ondblclick = () => {
+    relCamera.yaw = 0.35; relCamera.pitch = -0.2; relCamera.roll = 0; relCamera.distance = 0;
+    relCamera.auto = true;
+  };
+
+  frame(0);
+}
+
+/* ---------- 关系网 ---------- */
+async function loadRelations() {
+  try {
+    const data = objectFrom(await call("relations")) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    relItems = items;
+    window.__graphActive = "";
+    renderGraph(items);
+  } catch (error) {
+    const box = document.getElementById("relLegend");
+    if (box) box.textContent = "读取失败：" + error.message;
+  }
+}
+
+function openRelNode(id) {
+  const key = String(id || "");
+  const edges = (relItems || []).filter((edge) => String(edge.a_uid) === key || String(edge.b_uid) === key);
+  const first = edges[0] || {};
+  const name = (String(first.a_uid) === key ? first.a_name : first.b_name) || key;
+  relSelectedEdge = edges[0] || null;
+  const title = document.getElementById("relNodeTitle");
+  const sub = document.getElementById("relNodeSub");
+  const box = document.getElementById("relNodeEdges");
+  if (!title || !sub || !box) return;
+  title.textContent = name;
+  sub.textContent = "UID：" + key + " · 关系 " + edges.length + " 条";
+  box.textContent = "";
+  if (!edges.length) {
+    box.innerHTML = '<div class="hint">这个节点没有关系边。</div>';
+  }
+  edges.forEach((edge, index) => {
+    const row = document.createElement("label");
+    row.className = "rel-node-edge";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "relNodeEdge";
+    radio.checked = index === 0;
+    radio.addEventListener("change", () => { relSelectedEdge = edge; });
+    const left = document.createElement("span");
+    left.className = "edge-left";
+    left.textContent = edge.a_name || edge.a_uid || "";
+    const center = document.createElement("span");
+    center.className = "edge-center";
+    const relation = document.createElement("span");
+    relation.className = "edge-relation";
+    relation.textContent = edge.relation || "朋友";
+    const arrow = document.createElement("span");
+    arrow.className = "edge-arrow";
+    arrow.textContent = "↔";
+    center.appendChild(relation);
+    center.appendChild(arrow);
+    if (edge.note) {
+      const note = document.createElement("span");
+      note.className = "edge-note";
+      note.textContent = edge.note;
+      center.appendChild(note);
+    }
+    const right = document.createElement("span");
+    right.className = "edge-right";
+    right.textContent = edge.b_name || edge.b_uid || "";
+    row.appendChild(radio); row.appendChild(left); row.appendChild(center); row.appendChild(right);
+    box.appendChild(row);
+  });
+  const modal = document.getElementById("relNodeModal");
+  if (modal) modal.hidden = false;
+}
+
+async function deleteRelEdge() {
+  if (!relSelectedEdge) {
+    toast("先选中一条关系", true);
+    return;
+  }
+  const edge = relSelectedEdge;
+  const left = edge.a_name || edge.a_uid || "";
+  const right = edge.b_name || edge.b_uid || "";
+  // 删关系会两边一起删（想记 + 陪伴），点错一次就找不回来，先问一句
+  const ask = "确定删除「" + left + " ↔ " + right + "（" + (edge.relation || "朋友") + "）」这条关系吗？\n想记和陪伴两边都会删掉。";
+  if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(ask)) {
+    return;
+  }
+  try {
+    const res = await call("relation/delete", {
+      a_uid: edge.a_uid, b_uid: edge.b_uid, confirm: 1,
+    });
+    const data = objectFrom(res) || {};
+    if (res && res.code !== undefined && Number(res.code) !== 0) {
+      toast((res && res.msg) || "删除失败", true);
+      return;
+    }
+    toast(((res && res.msg) || "已删除") + (data.warning ? "（" + data.warning + "）" : ""));
+    const modal = document.getElementById("relNodeModal");
+    if (modal) modal.hidden = true;
+    await loadRelations();
+  } catch (error) {
+    toast("删除失败：" + (error.message || error), true);
+  }
+}
+
+document.getElementById("relNodeClose").addEventListener("click", () => {
+  const modal = document.getElementById("relNodeModal");
+  if (modal) modal.hidden = true;
+});
+document.getElementById("relNodeModal").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) event.currentTarget.hidden = true;
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    const modal = document.getElementById("relNodeModal");
+    if (modal) modal.hidden = true;
+  }
+});
+document.getElementById("relNodeDelete").addEventListener("click", deleteRelEdge);
+
+document.getElementById("relAuto").addEventListener("change", (event) => {
+  relCamera.auto = !!event.target.checked;
+});
+
+document.getElementById("btnRelReload").addEventListener("click", loadRelations);
+
+async function loadChat() {
+  const box = document.getElementById("chatList");
+  box.textContent = "读取中…";
+  try {
+    const umo = (document.getElementById("chatUmo").value || "").trim();
+    const data = objectFrom(await call("messages", { umo, limit: 300 })) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有聊天记录。</div>'; return; }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "msg";
+      const who = document.createElement("div");
+      who.className = "who";
+      const speaker = item.role === "bot" ? "她" : (item.name || "他");
+      who.textContent = speaker + (item.platform ? " · " + item.platform : "");
+      const txt = document.createElement("div");
+      txt.className = "txt";
+      txt.textContent = (item.role === "summary" ? "【摘要】" : "") + (item.content || "");
+      const time = document.createElement("div");
+      time.className = "time";
+      time.textContent = fmtTime(item.created_at);
+      const del = document.createElement("button");
+      del.className = "ghost";
+      del.textContent = "删";
+      del.addEventListener("click", async () => {
+        try {
+          await call("message/delete", { id: item.id });
+          loadChat();
+        } catch (error) { toast("删除失败：" + error.message, true); }
+      });
+      row.appendChild(who); row.appendChild(txt); row.appendChild(time); row.appendChild(del);
+      box.appendChild(row);
+    });
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+
+document.getElementById("btnChatReload").addEventListener("click", loadChat);
+document.getElementById("btnChatClear").addEventListener("click", async () => {
+  const umo = (document.getElementById("chatUmo").value || "").trim();
+  if (!window.confirm("清空" + (umo ? "这个会话" : "全部") + "聊天记录？不可恢复。")) return;
+  try {
+    await call("message/clear", { umo, confirm: 1 });
+    toast("已清空");
+    loadChat();
+    loadStatus();
+  } catch (error) { toast("清空失败：" + error.message, true); }
+});
+
+/* ---------- 日程 ---------- */
+async function loadSchedule() {
+  const box = document.getElementById("schedList");
+  box.textContent = "读取中…";
+  try {
+    const data = objectFrom(await call("schedule")) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有日程缓存。</div>'; return; }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "item";
+      const left = document.createElement("div");
+      left.className = "grow";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = item.key;
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = (item.size / 1024).toFixed(1) + " KB";
+      left.appendChild(name); left.appendChild(sub);
+      row.appendChild(left);
+      row.addEventListener("click", () => viewSchedule(item.key));
+      const del = document.createElement("button");
+      del.className = "ghost danger";
+      del.textContent = "删";
+      del.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!window.confirm("删除缓存 " + item.key + "？")) return;
+        try {
+          await call("schedule/delete", { key: item.key });
+          toast("已删除");
+          loadSchedule();
+        } catch (error) { toast("删除失败：" + error.message, true); }
+      });
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+
+async function viewSchedule(key) {
+  try {
+    const data = objectFrom(await call("schedule", { key })) || {};
+    document.getElementById("schedView").hidden = false;
+    document.getElementById("schedTitle").textContent = key;
+    document.getElementById("schedBody").value = JSON.stringify(data.value, null, 2);
+  } catch (error) { toast("读取失败：" + error.message, true); }
+}
+
+document.getElementById("btnSchedReload").addEventListener("click", loadSchedule);
+document.getElementById("btnSchedClose").addEventListener("click", () => {
+  document.getElementById("schedView").hidden = true;
+});
+
+/* ---------- 日志 ---------- */
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+
+async function loadBackups() {
+  const box = document.getElementById("backupList");
+  box.textContent = "读取中…";
+  try {
+    const data = objectFrom(await call("backup/list")) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有备份，点「立即备份」生成一份。</div>'; return; }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "msg";
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = item.name;
+      const txt = document.createElement("div");
+      txt.className = "txt";
+      txt.textContent = fmtBytes(item.size) + " · " + fmtTime(item.mtime);
+      const btn = document.createElement("button");
+      btn.className = "ghost";
+      btn.textContent = "恢复";
+      btn.addEventListener("click", async () => {
+        if (!window.confirm("从这份备份合并恢复？现有记忆不会被删除。")) return;
+        try {
+          const res = await call("backup/restore", { name: item.name });
+          const counts = (res && res.data) || {};
+          toast("已恢复：记忆 " + (counts.memories || 0) + " · 画像 " + (counts.profiles || 0) + " · 关系 " + (counts.relations || 0));
+          loadBackups();
+        } catch (error) { toast("恢复失败：" + error.message, true); }
+      });
+      row.appendChild(who); row.appendChild(txt); row.appendChild(btn);
+      box.appendChild(row);
+    });
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+
+document.getElementById("btnBackupNow").addEventListener("click", async () => {
+  try {
+    const res = await call("backup/now", {});
+    const name = (res && res.data && res.data.name) || "";
+    if (!name) throw new Error("后端没有返回备份文件名");
+    toast("已备份：" + name);
+    loadBackups();
+  } catch (error) { toast("备份失败：" + error.message, true); }
+});
+
+document.getElementById("btnBackupExport").addEventListener("click", async () => {
+  try {
+    const res = await call("backup/export", {});
+    const snapshot = (res && res.data && res.data.snapshot) || {};
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
+    a.href = url; a.download = "amo_data_memories_" + stamp + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("已导出 JSON");
+  } catch (error) { toast("导出失败：" + error.message, true); }
+});
+
+document.getElementById("btnBackupImport").addEventListener("click", () => {
+  document.getElementById("backupFile").click();
+});
+document.getElementById("backupFile").addEventListener("change", async (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const snapshot = JSON.parse(text);
+    const res = await call("backup/import", { snapshot });
+    const counts = (res && res.data) || {};
+    toast("已导入：记忆 " + (counts.memories || 0) + " · 画像 " + (counts.profiles || 0) + " · 关系 " + (counts.relations || 0));
+    loadBackups();
+  } catch (error) { toast("导入失败：" + error.message, true); }
+  event.target.value = "";
+});
+
+async function loadLogs() {
+  const box = document.getElementById("logList");
+  box.textContent = "读取中…";
+  try {
+    const level = (document.getElementById("logLevel").value || "").trim();
+    const data = objectFrom(await call("logs", level ? { level } : undefined)) || {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有日志。</div>'; return; }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "msg";
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = item.level + (item.tag ? " · " + item.tag : "");
+      const txt = document.createElement("div");
+      txt.className = "txt";
+      txt.textContent = item.content;
+      const time = document.createElement("div");
+      time.className = "time";
+      time.textContent = fmtTime(item.created_at);
+      const del = document.createElement("button");
+      del.className = "ghost";
+      del.textContent = "删";
+      del.addEventListener("click", async () => {
+        try {
+          await call("log/delete", { id: item.id });
+          loadLogs();
+        } catch (error) { toast("删除失败：" + error.message, true); }
+      });
+      row.appendChild(who); row.appendChild(txt); row.appendChild(time); row.appendChild(del);
+      box.appendChild(row);
+    });
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+
+document.getElementById("btnLogReload").addEventListener("click", loadLogs);
+document.getElementById("logLevel").addEventListener("change", loadLogs);
+document.getElementById("btnLogClear").addEventListener("click", async () => {
+  if (!window.confirm("清空全部日志？不可恢复。")) return;
+  try {
+    await call("log/clear", { confirm: 1 });
+    toast("已清空");
+    loadLogs();
+  } catch (error) { toast("清空失败：" + error.message, true); }
+});
+
+loadStatus();
+loadProfiles();
+loadRelations();  // 默认打开的就是「关系网」tab，启动时也要画一次
+</script>
+<footer style="padding:0 16px 28px;text-align:center;font-size:11px;color:var(--muted)">by 彩虹upup · 感谢《我会牢牢记住你》和《我想永远记住你》的作者</footer>
+</body>
+</html>

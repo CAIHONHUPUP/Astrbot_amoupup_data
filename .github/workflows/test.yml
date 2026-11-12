@@ -1,0 +1,19 @@
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - name: Type check
+        run: python tools/mypy_check.py
+      - name: Run tests
+        run: coverage run -m pytest tests -q
+      - name: Coverage floor
+        run: coverage report

@@ -1,1 +1,196 @@
-# Astrbot_amoupup_data
+# 我能永远记住你（Astrbot_amoupup_data）
+
+> by 彩虹upup · 感谢《我会牢牢记住你》和《我想永远记住你》的作者
+
+> GitHub：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
+
+## 2.8.2 独立仓库 + 更名「我能永远记住你」
+
+- 仓库从 fork 改为独立仓库 `CAIHONHUPUP/Astrbot_amoupup_data`；
+- README 更名、GitHub 地址改成本仓库。
+
+## 2.8.0 摘要拆分 + 元问题兜底
+
+- 周整理不再把同一天的摘要拼成 4000 字长条：合并上限 800 字，超了先按句子拆成多条（`summary_merge_max_chars`）；
+- 「你还记得我吗 / 你记得什么」没命中关键词时按重要度兜底 2~3 条，不再返回空（`meta_query_fallback`）；
+- 修「礼拜天 / 周日 / 周天」解析不到；测试 273 项，覆盖率 90%。
+
+## 2.7.9 仓库改名
+
+- `add_message` 写库失败不再只在 debug 日志里；排查「消息没进库」时能直接看到。
+
+## 2.7.2 整理循环提速
+
+- 近重复合并的 token 集合只建一次，600 条样本 1.15s → 0.83s，命中结果不变；
+- 删掉整理函数末尾一段死代码（还会多抢一次锁）；
+- 新增 4 项回归测试。
+
+
+## 2.7.1 群聊 / 私聊记忆隔离
+
+- 写入侧隔离：`memories` 的去重键（`idem_key`）只在自己所属的会话里生效，
+  群里说过的「好呀」不会顶掉私聊里的同一条；
+- 唯一索引 `idx_mem_idem` 由 3 列扩到 5 列（含 `scope` / `group_id`），
+  老库打开时自动重建；摘要压缩改成按「人 + 日期 + 会话」分组，群聊与私聊不再压成一条；
+- 新增 `tests/test_scope_isolation.py`（8 项）。数据库结构与接口参数不变。
+
+
+## 2.7.0 存储层拆分
+
+- `store.py` 2,913 行拆成 7 个模块，对外 API 与数据库结构不变；
+- 面板 / 命令 API 层补测，覆盖率 68% → 85%；
+- 2.5.2–2.6.3 的关系图、时区、logger 合规修复全部保留；
+- 新增 mypy 类型检查与覆盖率门槛。
+
+
+- 测试版动末位、发布版动第二位、大版本动首位；
+- 不再限制奇偶与数字 1、7。
+
+
+## 2.6.2 图标定稿
+
+- 图标与陪伴、生图统一；
+- 本次仅为替换文件后的版本推进，功能与 2.6.0 一致。
+
+
+## 2.6.0 换新图标
+
+- 图标换成品牌图：两个人剪影，心口各一个手写 `Amo`；
+- 与陪伴、生图两个插件共用同一张。
+
+
+## 2.5.8 上架审核合规
+
+- logger 只从 `astrbot.api` 导入，去掉内置 `logging` 兜底（测试环境用空实现）；
+- 面板 `api_memories` 的 `store.recall()` 改走 `asyncio.to_thread`，语义召回不再堵事件循环；
+- 新增源码守卫测试，回归直接失败。
+
+
+## 2.5.6 「昨天」按配置时区算
+
+- 修掉一个只在北京时间 00:00–08:00 出现的错位：`_time_window()` 之前用服务器时区取"今天"，
+  问「昨天」会落到前一天，时间回看 / 每日总结 / 里程碑跟着漏；
+- 现在统一走配置时区（默认 Asia/Shanghai），窗口起止按该时区换成秒。
+
+
+## 2.5.4 仓库地址规范
+
+- 插件 `repo` 固定为 `https://github.com/CAIHONHUPUP/Astrbot_amoupup_data/`；
+- 新增 `python3 tools/check_version.py`：版本号四处一致 + 规则 + repo 格式。
+
+
+## 2.5.2 关系图对齐陪伴
+
+- 画像里设的「恋人 / 家人」直接进关系图，不再显示成自动沉淀的「熟人」；
+- 关系图改成和陪伴一致的五档配色（仇恨黑 / 抵触黄 / 普通白 / 熟识紫 / 恋人粉）。
+
+
+
+## 为什么单独拆一个插件
+
+原版 memory_companion 功能很全，但也很重：五元组哈希身份、P5 鉴权、证据链、审计、
+多人格嵌套命名空间……对只服务一个陪伴机器人的场景来说用不上，维护成本还高。
+
+这个插件按同样的功能思路**独立重写**，只保留真正需要的部分：
+
+| 保留 | 砍掉 |
+| --- | --- |
+| 画像（名字/称呼/关系/备注）可读可写 | 五元组哈希 person_id、身份契约 |
+| 记忆按 bot + uid + 群存储、FTS5 检索 | P5 鉴权、attestation、权限闸门 |
+| 关系网 | 证据链、溯源审计、纠正回执 |
+| 日程/世界观缓存 | 多人格嵌套、复杂 namespace |
+| 多 bot 隔离（bot_id） | 海量测试用例、管理后台冗余功能 |
+| 同一个人跨平台合并（QQ / 飞书 / Telegram…） | 跨平台账号密码、OAuth、统一登录 |
+
+## 存储位置
+
+```
+data/plugin_data/Astr_Amo_data/amo_data.db
+```
+
+SQLite + FTS5，只用标准库，不需要装任何依赖。
+
+## 给 Amo 调的接口
+
+插件实例上挂着 `mem`，Amo 拿到实例后直接 await：
+
+```python
+await plugin.mem.get_profile(bot_id, uid)
+await plugin.mem.save_profile(bot_id, uid, name="老公", relation="相恋")
+await plugin.mem.remember(bot_id, uid, "他养了一只叫团子的猫", kind="fact", importance=0.6)
+await plugin.mem.recall(bot_id, uid, "猫", limit=6)
+await plugin.mem.delete_memory(bot_id, memory_id)
+
+await plugin.mem.list_relations(bot_id)
+await plugin.mem.save_relation(bot_id, a_uid, b_uid, "朋友", "大学同学")
+await plugin.mem.delete_relation(bot_id, a_uid, b_uid)
+
+await plugin.mem.person_context(bot_id, "lark", "ou_abc", 8)   # 这个人在别的平台说过什么
+await plugin.mem.save_profile(bot_id, uid, name="阿墨", platform="aiocqhttp")
+
+await plugin.mem.cache_get(bot_id, "schedule:2026-11-09")
+await plugin.mem.cache_set(bot_id, "schedule:2026-11-09", data, ttl=86400)
+```
+
+画像的 `name` / `alias` / `relation` / `remark` 都可以随时改写再存回去，
+`save_profile` 只更新传进来的字段，没传的保持原值。
+
+## 面板
+
+插件详情 → 查看页面：
+
+- **画像**：搜索、编辑名字/别名/关系/备注、删除（连带记忆和关系边）、查看和新增/删除记忆；
+- **人物**：同一个人在不同平台（QQ / 飞书 / Telegram…）会并到一条下面，能看到他在这边说、在那边说了什么；
+  名字一样会自动并，并错了点进去「解绑」，也能手动把两条并成一条；
+- **关系网**：查看、添加、删除两个人之间的关系。
+
+## 配置
+
+| 配置 | 说明 |
+| --- | --- |
+| `bot_id` | 数据归属的机器人 ID，留空用 `default` |
+| `auto_create_profile` | 有人说话就自动建空画像 |
+| `max_recall` | 默认召回条数 |
+
+## 版本
+
+- 2.5.0：把 2.4.10–2.4.14 的改动收进合规版本（代码同 2.4.14；时区 / 3D 关系图 / 时间回看）。
+- 2.4.14：时区统一到配置时区（UTC 服务器下按天分组 / 时间检索不再错一天）。
+- 2.4.12：关系图改成 3D 神经元球（拖动旋转 / 滚轮缩放 / 双击回正 / 点击选中）。
+- 2.4.10：召回候选池分层（recall_recent_pool）、消息去重、时间检索增强，重新提交上架。
+- 2.4.8：仓库改名为 Astrbot_amoupup_data（插件 ID 仍是 Astr_Amo_data），链接同步。
+- 2.4.6：补齐时间回看 / 每日总结 / 里程碑接口（recall_messages / messages_since）。
+- 2.4.4：修好数据面板「聊天」页（之前没有加载函数），接口加超时。
+- 2.4.2：画像页改只读，修改统一回陪伴面板。
+- 2.4.0：关系图球半径随画布自适应，窄屏不顶边。
+- 2.3.8：旧数据导入后也能召回（scope 兼容 / 候选池补 id / 中性新鲜度 / 去重）。
+- 2.3.6：关系图改成 3D 神经元球（拖动旋转 / 滚轮缩放 / 双击回正）。
+- 2.3.4：关系图可拖动（坐标对齐 + pointer 事件）。
+- 2.3.2：关系网里的 `bot` 节点显示成「她」。
+- 2.3.0：召回改成 BM25（单字+二元组）+ 重要度 + 遗忘曲线，短词「上班」能命中「上夜班」。
+- 2.2.8：压缩摘要改用 summary 角色，不再冒充角色自述。
+- 2.2.6：关系网提到第一个页签，只保留只读图谱（增删在陪伴面板）。
+- 2.2.4：关系网页加力导向图谱（可拖动、按关系类型着色）。
+- 2.2.2：关系网列表显示名字，方便面板核对。
+- 2.2.0：`list_messages` 支持按 uid 查，供陪伴的上下文钩子用。
+- 2.0.8：修聚合模式下画像详情为空（跨 bot 定位）。
+- 2.0.6：面板聊天排版修复 + 手动绑定平台身份。
+- 2.0.4：跨平台人物合并（QQ / 飞书同一个人的聊天记录、画像能并到一起）。
+- 2.0.2：面板聚合所有 bot，修「没有任何数据」。
+- 1.0.0：首版。画像可编辑、记忆读写、FTS5 检索、关系网、缓存。
+
+## 反馈与维护
+
+- 仓库：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
+- 数据库位置：`data/plugin_data/Astr_Amo_data/amo_data.db`
+
+## 保留策略
+
+| 数据 | 默认保留 |
+| --- | --- |
+| 原始聊天记录 | 14 天（3 天前的会压成按天摘要，到期删除） |
+| 运行日志 | 7 天 |
+| 日程 / 世界观缓存 | 跟随陪伴插件，面板可手动删 |
+
+面板里「聊天 / 日程 / 日志」三个页签只提供查看和删除，不提供重建——
+日程什么时候生成、什么时候遗忘，仍然由陪伴插件决定。
