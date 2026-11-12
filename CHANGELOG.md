@@ -1,3 +1,8 @@
+## 2.8.6（2026-11-12 时间测试彻底不跟机器时区走）
+- `test_time_recall_store` 的期望值改用 `clock.now()` / `DataStore._epoch()` 计算，
+  不再用 `datetime.now()`；`上周三` 的 weekday 也按插件时区换算。
+- 这样 GitHub Actions 的 UTC runner、任何服务器时区都不会再差 8 小时；功能代码不变。
+
 ## 2.8.4（2026-11-12 CI 时区修复）
 - 测试进程固定 `Asia/Shanghai`（`tests/conftest.py` + `tzset`），修 GitHub Actions 的 UTC runner 下
   `test_time_recall_store` 等 7 项时间测试差 8 小时的失败；

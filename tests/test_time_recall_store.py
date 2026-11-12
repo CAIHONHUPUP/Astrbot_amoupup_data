@@ -15,43 +15,45 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from store import DataStore  # noqa: E402
+import clock  # noqa: E402
 
 
 def _ts(dt):
-    return int(dt.timestamp())
+    # 用插件自己的时区换算，不能跟着跑测试的机器时区走
+    return DataStore._epoch(dt)
 
 
 class TimeWindowTests(unittest.TestCase):
     def test_yesterday_whole_day(self):
-        yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        yesterday = clock.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
         start, end = DataStore._time_window("昨天我们聊了啥")
         self.assertEqual(start, _ts(yesterday))
         self.assertEqual(end, _ts(yesterday + timedelta(days=1)))
 
     def test_yesterday_afternoon_is_narrowed(self):
         # 「昨天下午」不能把上午的聊天也当成下午塞进提示词
-        yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        yesterday = clock.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
         start, end = DataStore._time_window("昨天下午")
         self.assertEqual(start, _ts(yesterday + timedelta(hours=12)))
         self.assertEqual(end, _ts(yesterday + timedelta(hours=18)))
 
     def test_last_night(self):
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
         start, end = DataStore._time_window("昨晚我们聊了什么")
         self.assertEqual(start, _ts(today - timedelta(days=1) + timedelta(hours=18)))
         self.assertEqual(end, _ts(today))
         self.assertEqual(DataStore._time_label("昨晚我们聊了什么"), "昨晚")
 
     def test_last_weekday(self):
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
         monday = today - timedelta(days=today.weekday())
         start, end = DataStore._time_window("还记得上周三我说的事吗")
         self.assertEqual(end - start, 86400)
-        self.assertEqual(datetime.fromtimestamp(start).weekday(), 2)  # 周三
+        self.assertEqual(datetime.fromtimestamp(start, clock.get_zone(clock.current_name())).weekday(), 2)  # 周三
         self.assertLess(start, _ts(monday))
 
     def test_recent_days(self):
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
         start, end = DataStore._time_window("最近3天我提过什么")
         self.assertEqual(start, _ts(today - timedelta(days=2)))
         self.assertEqual(end, _ts(today + timedelta(days=1)))
@@ -72,7 +74,7 @@ class RecallMessagesTests(unittest.TestCase):
         self.bot = "bot1"
         self.uid = "10001"
         self.umo = "aiocqhttp:FriendMessage:10001"
-        today0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today0 = clock.now().replace(hour=0, minute=0, second=0, microsecond=0)
         yesterday0 = today0 - timedelta(days=1)
         self._add("昨天的午饭", _ts(yesterday0 + timedelta(hours=11)))
         self._add("昨天下午的班", _ts(yesterday0 + timedelta(hours=14)))
@@ -108,7 +110,7 @@ class RecallMessagesTests(unittest.TestCase):
         self.assertEqual(other, [])
 
     def test_messages_since(self):
-        since = _ts(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
+        since = _ts(clock.now().replace(hour=0, minute=0, second=0, microsecond=0))
         rows = self.store.messages_since(self.bot, uid=self.uid, since=since)
         self.assertEqual([r["content"] for r in rows], ["今天的消息"])
 

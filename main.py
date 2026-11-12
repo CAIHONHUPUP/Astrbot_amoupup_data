@@ -83,7 +83,7 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
                 return ""
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "2.8.4"
+PLUGIN_VERSION = "2.8.6"
 DEFAULT_BOT_ID = "default"
 
 

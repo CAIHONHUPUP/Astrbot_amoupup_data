@@ -4,7 +4,12 @@
 
 > GitHub：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
 
+## 2.8.6 时间测试不再跟机器时区走
+
+- 时间窗测试用插件时区算期望，UTC runner 也不会再红；功能不变。
+
 ## 2.8.4 CI 时区修复
+
 
 - 测试固定上海时区，修 GitHub Actions 上 7 项时间测试失败；功能不变。
 
