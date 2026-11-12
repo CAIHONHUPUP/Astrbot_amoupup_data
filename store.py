@@ -230,6 +230,10 @@ class DataStore(SchemaMixin, PeopleMixin, MemoryMixin, MessagesMixin, LogsMixin)
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         self._open()
         self._init_schema()
+        try:
+            self.normalize_identities()
+        except Exception:
+            pass
         if self.setting("embedding_enabled"):
             self._ensure_emb_worker()
             if self.setting("embedding_backfill"):

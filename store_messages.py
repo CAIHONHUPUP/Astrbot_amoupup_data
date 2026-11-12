@@ -65,6 +65,7 @@ class MessagesMixin(_StoreBase):
         if role_n != "bot" and uid:
             try:
                 pid = self.resolve_person(bot_id, platform, uid, name)
+                uid = self.canonical_uid(bot_id, platform, uid) or uid
             except Exception:
                 pid = 0
         elif role_n == "bot":
@@ -117,6 +118,10 @@ class MessagesMixin(_StoreBase):
         """
         if since is not None:  # 兼容面板/里程碑旧调用（since=）
             since_ts = int(since)
+        try:
+            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+        except Exception:
+            pass
         where, params = self._msg_filters(bot_id, umo, uid)
         sql = ("SELECT id, umo, uid, name, role, content, created_at, platform, pid "
                "FROM messages" + where)
@@ -315,6 +320,10 @@ class MessagesMixin(_StoreBase):
         功能静默失效（amo 侧 callable=False 直接 return）。返回按时间正序。
         """
         limit = max(1, min(int(limit or 200), 1000))
+        try:
+            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+        except Exception:
+            pass
         start, end = self._time_window(query)
         if not start or not end:
             return []
@@ -345,6 +354,10 @@ class MessagesMixin(_StoreBase):
 
     def _list_rows(self, bot_id: str, umo: str, limit: int, pid: int, platform: str,
                    uid: str, role: str | None) -> List[Dict[str, Any]]:
+        try:
+            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+        except Exception:
+            pass
         where, params = _bot_filter(bot_id)
         sql = ("SELECT id, umo, uid, name, role, content, created_at, compressed, "
                "platform, pid FROM messages WHERE 1=1" + where)

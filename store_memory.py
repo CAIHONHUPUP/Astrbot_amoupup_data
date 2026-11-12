@@ -316,6 +316,10 @@ class MemoryMixin(_StoreBase):
         if not text:
             return {"ok": False, "reason": "empty"}
         bot_id, uid = str(bot_id), str(uid)
+        try:
+            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+        except Exception:
+            pass
         scope = "group" if str(scope) == "group" else "private"
         group_id = str(group_id or "") if scope == "group" else ""
         try:
@@ -699,6 +703,10 @@ class MemoryMixin(_StoreBase):
         两者都不满足就直接返回空，交给调用方说"不记得"。
         """
         bot_id, uid = str(bot_id), str(uid)
+        try:
+            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+        except Exception:
+            pass
         limit = max(1, min(int(limit or 6), 100))
         text = _clean(query, 200)
         meta_query = bool(text) and bool(self.setting("meta_query_fallback", True)) \
@@ -815,9 +823,9 @@ class MemoryMixin(_StoreBase):
             best_cos = ranked[0] if ranked else 0.0
             second = ranked[1] if len(ranked) > 1 else 0.0
             margin = best_cos - second
-            vec_pass = best_cos >= max(vec_min_cos, 0.45) and (
-                margin >= vec_min_margin or best_cos >= 0.75
-            )
+            # 纯语义命中必须“又像又突出”：bge-m3 中文余弦偏平（无关也能到 0.7+），
+            # 所以门槛提到 0.82，且 top 与第二名要拉开 margin；否则一律交给关键词闸。
+            vec_pass = best_cos >= max(vec_min_cos, 0.82) and margin >= vec_min_margin
 
         scored: List[Dict[str, Any]] = []
         top_rel = max(raw) if raw else 0.0
@@ -844,16 +852,23 @@ class MemoryMixin(_StoreBase):
             strong_hits = len(infos & doc_set) if infos else 0
             char_hits = len(qchars & doc_set) if qchars else 0
             coverage = (char_hits / float(len(qchars))) if qchars else 0.0
+            # 多字查询必须有「有信息量的二元组」命中；单字覆盖率太松，
+            # 「外面下雨了吗」会被「面 / 下 / 外」这种常用字拼出假命中。
             keyword_ok = (
                 strong_hits >= min_terms
                 or (len(qchars) == 1 and char_hits >= 1)
-                or (char_hits >= 2 and coverage >= 0.75)
+                or (len(qchars) == 2 and char_hits >= 2)
             )
             if q_vec:
                 # 关键词已经命中时，语义只做小幅加权（否则长摘要会靠"泛相似"挤掉精准记忆）；
                 # 关键词完全没命中时，才让语义分当主角。
                 w = vec_weight if not keyword_ok else min(vec_weight, 0.2)
                 rel = (1.0 - w) * rel + w * max(0.0, cos)
+            # 只有单个泛词命中（比如「外面」）且语义也不像时，不算证据：
+            # 防止「外面下雨了吗」被一条「他还在外面没吃饭」的旧记忆蹭上。
+            if (q_vec and keyword_ok and not date_hit and len(infos) >= 2
+                    and strong_hits <= 1 and cos < 0.35):
+                continue
             if text and not keyword_ok and not date_hit:
                 # 关键词没证据，就只认"明显更像"的那一条语义结果
                 if not vec_pass or cos < best_cos - 1e-9:
@@ -997,6 +1012,10 @@ class MemoryMixin(_StoreBase):
                 self.conn.commit()
         return picked
     def list_memories(self, bot_id: str, uid: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        try:
+            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+        except Exception:
+            pass
         where, params = _bot_filter(bot_id)
         sql = (
             "SELECT id, uid, content, kind, importance, created_at, hit_count, scope, group_id "

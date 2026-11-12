@@ -181,16 +181,16 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "importance_decay": RECALL_IMPORTANCE_DECAY,
     "auto_dedupe": True,               # 调用方没给 idem_key 时按内容指纹去重
     "near_duplicate_ratio": 0.92,      # 二元组 Jaccard 超过它就当同一件事
-    "embedding_enabled": False,        # 语义召回开关（本地 Ollama 等）
+    "embedding_enabled": False,        # 库层默认关；插件默认开（见 _conf_schema）
     "embedding_base": "http://127.0.0.1:11434",
     "embedding_model": "bge-m3",
     "embedding_timeout": 3.0,
     "vec_weight": 0.45,                # 语义分在相关性里的占比
-    "vec_min_cos": 0.45,               # 纯语义命中的最低余弦（bge-m3 中文普遍偏平）
+    "vec_min_cos": 0.82,               # 纯语义命中的最低余弦（bge-m3 中文普遍偏平）
     "vec_min_margin": 0.08,            # top 与第二名的余弦差；太小说明"谁都不像"
     "diversify_ratio": 0.75,        # 注入时同一件事只留一条（0=关闭多样化）
     "embedding_backfill": True,        # 启动时给旧记忆补向量
-    "embedding_backfill_limit": 200,   # 每次最多补多少条
+    "embedding_backfill_limit": 5000,  # 启动时最多排队补多少条（后台线程慢慢算）
     "recall_fts_enabled": False,       # 可选：FTS5 trigram 子串粗筛（默认关，见 CHANGELOG 实测）
     "recall_recent_pool": 600,         # 「最近活跃」这一层的上限，库大了不至于把几条热门记忆全捞进来
     "summary_merge_max_chars": 800,    # 同天摘要合并上限；超过就拆条，别造 4000 字怪物

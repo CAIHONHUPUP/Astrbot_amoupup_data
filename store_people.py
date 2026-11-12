@@ -232,6 +232,7 @@ class PeopleMixin(_StoreBase):
         bot_id, platform, uid = str(bot_id), str(platform or ""), str(uid)
         if not uid:
             return 0
+        self.clear_canonical_cache()
         with self.lock:
             pid = int(pid or 0)
             if pid <= 0:
@@ -263,6 +264,7 @@ class PeopleMixin(_StoreBase):
             return pid
     def unlink_identity(self, bot_id: str, platform: str, uid: str) -> bool:
         """解绑：这个身份单独变成一个人物，不删聊天记录。"""
+        self.clear_canonical_cache()
         with self.lock:
             row = self.conn.execute(
                 "SELECT pid FROM person_links WHERE bot_id=? AND platform=? AND uid=?",
@@ -295,6 +297,7 @@ class PeopleMixin(_StoreBase):
             return True
     def merge_persons(self, bot_id: str, keep_pid: int, drop_pid: int) -> bool:
         """把 drop 合并进 keep：身份、聊天记录、记忆都并过去，然后删掉 drop。"""
+        self.clear_canonical_cache()
         bot_id = str(bot_id)
         keep_pid, drop_pid = int(keep_pid or 0), int(drop_pid or 0)
         if not keep_pid or not drop_pid or keep_pid == drop_pid:
@@ -483,6 +486,133 @@ class PeopleMixin(_StoreBase):
             return [dict(row) for row in rows]
         except Exception:
             return []
+    def _canonical_link(self, links, fallback: str = "") -> str:
+        """同一个人选一个主身份：优先飞书 open_id，其次第一条。"""
+        for item in links or []:
+            platform = str(item.get("platform") or "")
+            uid = str(item.get("uid") or "")
+            if platform == "lark" and uid:
+                return uid
+        for item in links or []:
+            uid = str(item.get("uid") or "")
+            if uid:
+                return uid
+        return str(fallback or "")
+
+    def _canonical_cache_get(self):
+        cache = getattr(self, "_canonical_cache", None)
+        if cache is None:
+            cache = {}
+            self._canonical_cache = cache
+        return cache
+
+    def clear_canonical_cache(self) -> None:
+        self._canonical_cache = {}
+
+    def canonical_uid(self, bot_id: str, platform: str, uid: str) -> str:
+        """把任意平台身份换成这个人的主 uid（飞书优先），写消息/记忆时用。"""
+        bot_id = str(bot_id)
+        platform, uid = self._alias_of(bot_id, str(platform or ""), str(uid))
+        if not uid:
+            return ""
+        cache = self._canonical_cache_get()
+        key = (bot_id, platform, uid)
+        if key in cache:
+            return cache[key]
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT pid FROM person_links WHERE bot_id=? AND platform=? AND uid=?",
+                (str(bot_id), platform, uid),
+            ).fetchone()
+            if not row or not int(row["pid"] or 0):
+                return uid
+            links = self.conn.execute(
+                "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
+                (str(bot_id), int(row["pid"])),
+            ).fetchall()
+        result = self._canonical_link([dict(item) for item in links], uid)
+        cache[key] = result
+        return result
+
+    def canonical_uid_for_uid(self, bot_id: str, uid: str) -> str:
+        """没有平台信息时（remember 只带 uid）按 uid 找主身份。"""
+        uid = str(uid or "")
+        if not uid:
+            return ""
+        bot_id = str(bot_id)
+        cache = self._canonical_cache_get()
+        key = (bot_id, "__uid__", uid)
+        if key in cache:
+            return cache[key]
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT pid FROM person_links WHERE bot_id=? AND uid=? AND pid>0 LIMIT 1",
+                (bot_id, uid),
+            ).fetchone()
+            if not row:
+                return uid
+            links = self.conn.execute(
+                "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
+                (str(bot_id), int(row["pid"])),
+            ).fetchall()
+        result = self._canonical_link([dict(item) for item in links], uid)
+        cache[key] = result
+        return result
+
+    def normalize_identities(self, bot_id: str = "") -> int:
+        """把旧数据里飞书 open_id / QQ 号混用的 uid 统一成主 uid。"""
+        if not str(bot_id or ""):
+            # 启动时不知道 bot_id：按 persons 里出现过的 bot 逐个归一
+            try:
+                with self.lock:
+                    bots = [str(r["bot_id"]) for r in self.conn.execute(
+                        "SELECT DISTINCT bot_id FROM persons WHERE bot_id!=''"
+                    ).fetchall()]
+            except Exception:
+                bots = []
+            return sum(self.normalize_identities(bid) for bid in bots if bid)
+        where, params = _bot_filter(bot_id)
+        with self.lock:
+            pids = [int(r["pid"]) for r in self.conn.execute(
+                "SELECT DISTINCT pid FROM person_links WHERE pid>0" + where, params
+            ).fetchall()]
+            changed = 0
+            for pid in pids:
+                links = self.conn.execute(
+                    "SELECT platform, uid FROM person_links WHERE pid=?", (pid,)
+                ).fetchall()
+                links = [dict(item) for item in links]
+                if not links:
+                    continue
+                canonical = self._canonical_link(links)
+                if not canonical:
+                    continue
+                for item in links:
+                    uid = str(item.get("uid") or "")
+                    platform = str(item.get("platform") or "")
+                    if not uid:
+                        continue
+                    cur = self.conn.execute(
+                        "UPDATE messages SET uid=?, pid=? WHERE bot_id=? AND uid=? "
+                        "AND (pid=0 OR pid IS NULL)",
+                        (canonical, pid, str(bot_id), uid),
+                    )
+                    changed += max(0, cur.rowcount or 0)
+                    if uid != canonical:
+                        cur = self.conn.execute(
+                            "UPDATE messages SET uid=? WHERE bot_id=? AND pid=? AND role!='bot' AND uid=?",
+                            (canonical, str(bot_id), pid, uid),
+                        )
+                        changed += max(0, cur.rowcount or 0)
+                        cur = self.conn.execute(
+                            "UPDATE memories SET uid=? WHERE bot_id=? AND uid=?",
+                            (canonical, str(bot_id), uid),
+                        )
+                        changed += max(0, cur.rowcount or 0)
+            self.conn.commit()
+            self.clear_canonical_cache()
+            return changed
+
     def person_of(self, bot_id: str, platform: str, uid: str) -> Dict[str, Any]:
         platform, uid = self._alias_of(str(bot_id), str(platform or ""), str(uid))
         with self.lock:

@@ -189,6 +189,23 @@ class FakeVectorTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_pure_semantic_hit_without_keyword(self):
+        """没有关键词重合，但余弦足够高时也能召回（语义检索的本意）。"""
+        # 后台线程可能同时给这条记忆算向量，所以让它也算成同一个向量
+        self.store._embed = lambda text: [1.0, 0.0, 0.0]
+        mid = self.store.remember(BOT, UID, "主人养了一只橘色的猫。")["memory_id"]
+        self.store._store_vec(mid, [1.0, 0.0, 0.0])
+        rows = self.store.recall(BOT, UID, "毛孩子")
+        self.assertTrue(rows)
+        self.assertIn("猫", rows[0]["content"])
+
+    def test_semantic_gate_rejects_flat_high_cos(self):
+        """余弦接近但拉不开差距时不能硬塞一条。"""
+        self.store._embed = lambda text: [1.0, 0.0, 0.0] if text == "毛孩子" else [0.7, 0.7, 0.0]
+        mid = self.store.remember(BOT, UID, "主人养了一只橘色的猫。")["memory_id"]
+        self.store._store_vec(mid, [0.7, 0.7, 0.0])
+        self.assertEqual(self.store.recall(BOT, UID, "毛孩子"), [])
+
 
 if __name__ == "__main__":
     unittest.main()
