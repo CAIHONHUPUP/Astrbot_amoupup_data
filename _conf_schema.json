@@ -96,8 +96,8 @@
   "embedding_enabled": {
     "type": "bool",
     "description": "启用语义向量召回",
-    "hint": "用本地 embedding 服务（默认 Ollama 的 bge-m3）给记忆和查询算向量，同义改写也能搜到；服务不可用会自动退回纯关键词检索。",
-    "default": true
+    "hint": "需要本机跑着 embedding 服务（默认 Ollama 的 bge-m3）。默认关：新用户没装这个服务时，开着会让每条消息最多多等 3 秒、语义召回还一直是空的。装好服务再打开。",
+    "default": false
   },
   "embedding_base": {
     "type": "string",

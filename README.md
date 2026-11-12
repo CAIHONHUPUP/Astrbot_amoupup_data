@@ -4,7 +4,7 @@
 
 > GitHub：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
 
-## 2.9.1 CI 类型检查修复
+## 2.9.2 语义搜索默认关 + 安装说明
 
 - 补主 uid 映射的类型声明，mypy 通过。
 
@@ -136,13 +136,36 @@
 | 多 bot 隔离（bot_id） | 海量测试用例、管理后台冗余功能 |
 | 同一个人跨平台合并（QQ / 飞书 / Telegram…） | 跨平台账号密码、OAuth、统一登录 |
 
+## 安装
+
+> 本插件是「我能永远陪伴你」(`Astrbot_amoupup_forever`) 的记忆后端：**它自己不会聊天**，
+> 但不装它，陪伴插件就没有记忆（能说话、记不住事）。
+
+1. 把插件目录以 **`Astrbot_amoupup_data`** 这个名字放进 `data/plugins/`；用 WebUI 上传 zip 时，zip 解出来的顶层目录名也必须是 `Astrbot_amoupup_data`；
+2. 在 AstrBot「插件」页确认它是**启用**状态；它只用 Python 标准库（sqlite3 + FTS5），不需要装任何依赖；
+3. 重启 AstrBot，或只重载这两个插件；
+4. 两个插件谁先装都行，装好后会自动接上，不用填任何配置；
+5. 验证：私聊陪伴插件发 `/amo status`，最后一行应显示「🧠 记忆后端：已连接 Astrbot_amoupup_data」；
+   再发 `/amo memories`，有记忆就直接列出来，没记忆会说明是「真的没记过」还是「没连上」。
+
 ## 存储位置
 
 ```
-data/plugin_data/Astr_Amo_data/amo_data.db
+data/plugin_data/Astrbot_amoupup_data/amo_data.db
+data/plugin_data/Astrbot_amoupup_data/backups/     # 每天自动备份，保留最近 7 份
 ```
 
 SQLite + FTS5，只用标准库，不需要装任何依赖。
+
+插件目录、配置文件名、数据目录三处都用同一个名字 **`Astrbot_amoupup_data`**：
+
+```
+data/plugins/Astrbot_amoupup_data/
+data/config/Astrbot_amoupup_data_config.json
+data/plugin_data/Astrbot_amoupup_data/
+```
+
+旧版本（2.8.x 及以前）用的是 `Astr_Amo_data`；升级后旧数据目录会保留原样，不会被自动删除，确认新库正常后可自行备份删除。
 
 ## 给 Amo 调的接口
 
@@ -192,7 +215,7 @@ await plugin.mem.cache_set(bot_id, "schedule:2026-11-09", data, ttl=86400)
 - 2.4.14：时区统一到配置时区（UTC 服务器下按天分组 / 时间检索不再错一天）。
 - 2.4.12：关系图改成 3D 神经元球（拖动旋转 / 滚轮缩放 / 双击回正 / 点击选中）。
 - 2.4.10：召回候选池分层（recall_recent_pool）、消息去重、时间检索增强，重新提交上架。
-- 2.4.8：仓库改名为 Astrbot_amoupup_data（插件 ID 仍是 Astr_Amo_data），链接同步。
+- 2.4.8：仓库改名为 Astrbot_amoupup_data（当时插件 ID 还是 Astr_Amo_data；2026-11-12 起插件 ID 也统一为 Astrbot_amoupup_data），链接同步。
 - 2.4.6：补齐时间回看 / 每日总结 / 里程碑接口（recall_messages / messages_since）。
 - 2.4.4：修好数据面板「聊天」页（之前没有加载函数），接口加超时。
 - 2.4.2：画像页改只读，修改统一回陪伴面板。
@@ -216,7 +239,7 @@ await plugin.mem.cache_set(bot_id, "schedule:2026-11-09", data, ttl=86400)
 ## 反馈与维护
 
 - 仓库：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
-- 数据库位置：`data/plugin_data/Astr_Amo_data/amo_data.db`
+- 数据库位置：`data/plugin_data/Astrbot_amoupup_data/amo_data.db`
 
 ## 保留策略
 

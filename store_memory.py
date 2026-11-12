@@ -226,6 +226,18 @@ class MemoryMixin(_StoreBase):
                 return [float(x) for x in vec]
         except Exception:
             self._emb_down_until = time.time() + 60.0
+            # 只提醒一次：没装 embedding 服务的人，否则每次失败都刷屏。
+            # 说清楚「退回了什么、还能不能用」，别让人以为记忆坏了。
+            if not getattr(self, "_emb_warned", False):
+                self._emb_warned = True
+                try:
+                    logger.warning(
+                        "[想记] 连不上 embedding 服务 %s（%s）：语义召回已退回关键词，"
+                        "记忆读写不受影响；装好服务或关掉 embedding_enabled 即可"
+                        % (url, model)
+                    )
+                except Exception:
+                    pass
         return []
     def _embed_cached(self, text: str) -> List[float]:
         key = str(text or "")[:200]

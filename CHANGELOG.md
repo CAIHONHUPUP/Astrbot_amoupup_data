@@ -1,3 +1,10 @@
+## 2.9.2（2026-11-12 语义搜索默认关 + 安装说明）
+- **新装默认关闭语义向量召回**：没装 Ollama 的人不会再每条消息多等最多 3 秒；
+  已经保存的配置不受影响（原来开着的仍然开着）。
+- **连不上 embedding 服务时只提醒一次**："语义召回已退回关键词，记忆读写不受影响"，
+  不再什么都不说、也不再每次失败都刷日志。
+- **README** 补了安装小节和真实存储路径（`plugin_data/Astrbot_amoupup_data/`）。
+
 ## 2.9.1（2026-11-12 修 CI 类型检查）
 - `MessagesMixin` / `MemoryMixin` 补 `canonical_uid` 的类型声明，mypy 不再报 attr-defined；
 - 本地 `tools/mypy_check.py` 通过（13 files），280 项测试全过。
