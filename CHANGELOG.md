@@ -15,6 +15,9 @@
 - 新增接口：`/groups`、`/group/rename`、`/memory/backfill_platform`（面板"回填来源"按钮）、
   `/messages?kind=`。
 - 测试 319 项全过（新增身份/群名/回填相关 20+ 项）。
+- **新增质量门 `tools/quality_gate.py`**：schema / 编译 / 路由数量（34）/ 面板 JS 语法 /
+  pyflakes / 全量测试，一条命令本地或 CI 跑；CI 增加 `Quality gate --fast` 步骤，
+  顺手清掉两个 pyflakes 告警（未使用变量）。
 
 ## 2.9.2（2026-11-12 语义搜索默认关 + 安装说明）
 - **新装默认关闭语义向量召回**：没装 Ollama 的人不会再每条消息多等最多 3 秒；

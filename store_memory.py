@@ -911,7 +911,6 @@ class MemoryMixin(_StoreBase):
             # 关键词证据：命中二元组/英文词，或短词的单字覆盖率够高
             strong_hits = len(infos & doc_set) if infos else 0
             char_hits = len(qchars & doc_set) if qchars else 0
-            coverage = (char_hits / float(len(qchars))) if qchars else 0.0
             # 多字查询必须有「有信息量的二元组」命中；单字覆盖率太松，
             # 「外面下雨了吗」会被「面 / 下 / 外」这种常用字拼出假命中。
             keyword_ok = (

@@ -13,6 +13,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Type check
         run: python tools/mypy_check.py
+      - name: Quality gate
+        run: python tools/quality_gate.py --fast
       - name: Run tests
         run: coverage run -m pytest tests -q
       - name: Coverage floor

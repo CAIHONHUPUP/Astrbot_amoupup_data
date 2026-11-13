@@ -800,7 +800,6 @@ class PeopleMixin(_StoreBase):
                     continue
                 for item in links:
                     uid = str(item.get("uid") or "")
-                    platform = str(item.get("platform") or "")
                     if not uid:
                         continue
                     cur = self.conn.execute(
