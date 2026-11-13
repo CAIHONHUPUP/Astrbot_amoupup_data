@@ -6,83 +6,47 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>我能永远记住你</title>
 <style>
-  :root { --bg:#eef8ff; --bg2:#e2f2ff; --card:#ffffff; --text:#2b3440; --muted:#7b8794;
-          --line:#dcecf9; --pink:#0ea5e9; --soft:#f2faff; }
+  :root { --bg:#f7f5f8; --card:#fff; --text:#2c2430; --muted:#8a8090; --line:#ebe4ee; --pink:#d4578a; }
   * { box-sizing: border-box; }
-  body { margin:0; background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%); background-attachment:fixed;
-         color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px; }
-  header { padding:14px 16px; background:rgba(255,255,255,.82); backdrop-filter:blur(12px);
-           border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px; }
+  header { padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   .badge { font-size:11px; color:var(--muted); }
   nav { display:flex; gap:6px; padding:10px 16px 0; overflow-x:auto; }
-  nav button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:7px 13px;
-              border-radius:11px; font-size:13px; cursor:pointer; white-space:nowrap; box-shadow:0 1px 2px rgba(30,80,130,.04); }
-  nav button:hover { border-color:#bfe3fa; background:var(--soft); }
-  nav button.active { border-color:var(--pink); color:var(--pink); background:#f0faff; }
-  .guard-sub { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-  .guard-sub button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:6px 14px;
-                      border-radius:10px; font-size:13px; cursor:pointer; }
-  .guard-sub button.active { border-color:var(--pink); color:var(--pink); background:#f0faff; font-weight:600; }
-  .guard-mem { padding:7px 0; border-bottom:1px dashed var(--line); }
-  .guard-mem .t { font-size:13px; line-height:1.6; }
-  .guard-mem .m { font-size:11px; color:var(--muted); margin-top:2px; }
+  nav button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:6px 12px; border-radius:8px; font-size:13px; cursor:pointer; white-space:nowrap; }
+  nav button.active { border-color:var(--pink); color:var(--pink); }
   main { padding:12px 16px 40px; }
   .panel { display:none; }
   .panel.active { display:block; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px; margin-bottom:10px;
-          box-shadow:0 6px 20px rgba(30,90,150,.06); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .grow { flex:1; min-width:120px; }
-  input, select, textarea { width:100%; border:1px solid var(--line); border-radius:11px; padding:8px 11px; font-size:13px;
-                          background:var(--card); color:var(--text); font-family:inherit; }
-  input:focus, select:focus, textarea:focus { outline:none; border-color:#9fd7f6; box-shadow:0 0 0 3px rgba(14,165,233,.10); }
+  input, select, textarea { width:100%; border:1px solid var(--line); border-radius:8px; padding:7px 9px; font-size:13px; background:#fff; color:var(--text); font-family:inherit; }
   textarea { min-height:60px; resize:vertical; }
   label { display:block; font-size:12px; color:var(--muted); margin:6px 0 3px; }
-  button.primary { background:var(--pink); color:#fff; border:none; border-radius:11px; padding:8px 16px; font-size:13px;
-                  cursor:pointer; box-shadow:0 4px 12px rgba(14,165,233,.28); }
-  button.primary:hover { filter:brightness(1.05); }
-  button.ghost { background:var(--card); border:1px solid var(--line); border-radius:11px; padding:7px 12px; font-size:12px;
-                cursor:pointer; color:var(--text); box-shadow:0 1px 2px rgba(30,80,130,.04); }
-  button.ghost:hover { background:var(--soft); border-color:#bfe3fa; }
-  button.danger { color:#e05780; border-color:#f6dbe5; }
-  button.danger:hover { background:#fff5f8; border-color:#f3c3d5; }
+  button.primary { background:var(--pink); color:#fff; border:none; border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12px; cursor:pointer; color:var(--muted); }
+  button.danger { color:#c0392b; border-color:#f0d7d3; }
   .modal { position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(6,5,16,.66); backdrop-filter:blur(5px); }
   .modal[hidden] { display:none; }
   .modal-card { width:min(92vw,520px); max-height:82vh; overflow:auto; background:linear-gradient(165deg,#1e1938,#0c0918 72%); color:#f1ecff; border:1px solid rgba(255,255,255,0.14); border-radius:18px; padding:16px 18px; box-shadow:0 24px 70px rgba(0,0,0,0.55); }
   .modal-card .hint { color:#b9addb; }
-  .rel-node-edge { display:grid; grid-template-columns:auto auto minmax(60px,1fr) auto; align-items:center; gap:10px; padding:9px 12px; margin-top:6px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); cursor:pointer; }
+  .rel-node-edge { display:grid; grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:8px; padding:9px 10px; margin-top:6px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); cursor:pointer; }
   .rel-node-edge input { accent-color:#ff5fa2; }
   .rel-node-edge .edge-left { text-align:right; color:#f3edff; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .rel-node-edge .edge-right { text-align:left; color:#f3edff; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .rel-node-edge .edge-center { display:flex; flex-direction:column; align-items:center; justify-content:center;
-    line-height:1.15; min-width:0; width:100%; }
+  .rel-node-edge .edge-center { display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.15; min-width:64px; }
   .rel-node-edge .edge-relation { font-size:11px; color:#ffd6e8; background:rgba(255,95,162,0.18); border:1px solid rgba(255,95,162,0.38); border-radius:999px; padding:0 7px; margin-bottom:1px; }
-  /* 双向箭头：用 CSS 画一条线 + 两个箭头，宽度自动撑满两边的名字 */
-  .rel-node-edge .edge-arrow { position:relative; display:block; width:100%; height:0;
-    margin:5px 0 3px; border-top:2px solid #ff9cc6; font-size:0; line-height:0; }
-  .rel-node-edge .edge-arrow::before,
-  .rel-node-edge .edge-arrow::after { content:""; position:absolute; top:-6px; width:8px; height:8px;
-    border-top:2px solid #ff9cc6; border-right:2px solid #ff9cc6; }
-  .rel-node-edge .edge-arrow::before { left:0; transform:rotate(-135deg); }
-  .rel-node-edge .edge-arrow::after { right:0; transform:rotate(45deg); }
+  .rel-node-edge .edge-arrow { color:#ff9cc6; font-size:15px; font-weight:600; }
   .rel-node-edge .edge-note { color:#a99bd0; font-size:10px; margin-top:1px; white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
   .rel-node-delete { width:100%; margin-top:12px; padding:10px; border-radius:10px; font-weight:600; color:#ffd6e4; border:1px solid rgba(255,95,162,0.5); background:linear-gradient(90deg, rgba(255,95,162,0.22), rgba(255,95,162,0.08)); }
-  /* 关系网：深色星空卡片，用柔和的深蓝渐变 + 大投影浮在浅色页面上，过渡不生硬 */
-  #panel-relations .card { background:radial-gradient(circle at 28% 12%, #24304f 0%, #131a2e 55%, #0b1020 100%);
-    border-color:rgba(120,150,200,0.22); color:#e8eeff;
-    box-shadow:0 20px 56px rgba(16,32,64,0.30), 0 2px 6px rgba(16,32,64,0.16); }
-  #panel-relations .card .hint { color:#a9b7d4; }
-  /* 深色卡里的按钮：半透明深底 + 浅字，尺寸比浅色页上的小一号 */
-  #panel-relations .ghost { background:rgba(255,255,255,0.08); color:#e8eeff;
-    border:1px solid rgba(150,180,230,0.30); padding:4px 10px; font-size:11.5px;
-    border-radius:9px; box-shadow:none; line-height:1.4; }
-  #panel-relations .ghost:hover { background:rgba(150,180,230,0.20); border-color:rgba(150,180,230,0.52); color:#ffffff; }
-  #relGraph { border-radius:14px; box-shadow:inset 0 0 70px rgba(0,0,0,0.45); }
+  #panel-relations .card { background:radial-gradient(circle at 25% 15%, #251d46, #0b0817 72%); border-color:#2b2442; color:#efe9ff; }
+  #panel-relations .card .hint { color:#b5a9d6; }
+  #panel-relations .ghost { color:#e7dcff; border-color:rgba(255,255,255,0.2); }
+  #relGraph { border-radius:14px; box-shadow:inset 0 0 60px rgba(0,0,0,0.5); }
   .list { display:flex; flex-direction:column; gap:6px; }
-  .item { border:1px solid var(--line); border-radius:12px; padding:10px 12px; display:flex; gap:10px; align-items:center;
-         cursor:pointer; background:var(--card); box-shadow:0 1px 2px rgba(30,80,130,.04); }
-  .item:hover { border-color:#bfe3fa; background:var(--soft); }
+  .item { border:1px solid var(--line); border-radius:10px; padding:9px 10px; display:flex; gap:10px; align-items:center; cursor:pointer; background:#fff; }
+  .item:hover { border-color:#e0d3e6; }
   .item .name { font-weight:600; font-size:14px; }
   .item .sub { font-size:11px; color:var(--muted); margin-top:2px; word-break:break-all; }
   .msg { padding:7px 0; border-bottom:1px dashed var(--line); display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
@@ -98,7 +62,7 @@
   /* 年月日多级菜单（画像 / 人物 / 聊天共用） */
   .tree { display:flex; flex-direction:column; gap:2px; }
   .tree-toggle { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:8px; cursor:pointer; user-select:none; }
-  .tree-toggle:hover { background:var(--soft); }
+  .tree-toggle:hover { background:#f6f1f8; }
   .tree-toggle .caret { width:10px; font-size:9px; color:var(--muted); transition:transform .15s; }
   .tree-toggle.open .caret { transform:rotate(90deg); }
   /* 层级越深字号越小：一级(平台/年) > 二级(月) > 三级(日) */
@@ -123,8 +87,15 @@
   .personbar button.active { border-color:var(--pink); color:var(--pink); background:#fdf4f8; }
 </style>
 <style id="amo-skyblue-theme">
-  :root { --pink:#0ea5e9; --pink2:#38bdf8; --brand:#0ea5e9; }
-  html[data-theme="dark"] { --pink:#38bdf8; --pink2:#7dd3fc; }
+  :root { --pink:#0ea5e9; --pink2:#38bdf8; --brand:#0ea5e9; --bg:#f2f9ff; --line:#d9ecfb; --muted:#6f93b5; }
+  html[data-theme="dark"] { --pink:#38bdf8; --pink2:#7dd3fc; --bg:#0b1520; --line:#1e3a52; }
+  .guard-sub { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .guard-sub button { border:1px solid #a9d4ff; background:#f4faff; color:#1f6fd0; border-radius:999px; padding:5px 14px; font-size:13px; cursor:pointer; }
+  .guard-sub button.active { background:#0ea5e9; border-color:#0ea5e9; color:#fff; }
+  .guard-mem { padding:6px 4px; border-bottom:1px dashed #e2f0fb; }
+  .guard-mem .t { color:#14456f; font-size:13px; }
+  .guard-mem .m { color:#6f93b5; font-size:12px; margin-top:2px; }
+  #panel-guard > .card { background:linear-gradient(180deg,#fbfdff,#eef7ff); border:1px solid #d9ecfb; }
 </style>
 </head>
 <body>
@@ -138,7 +109,6 @@
   <button data-tab="profiles">画像</button>
   <button data-tab="persons">人物</button>
   <button data-tab="chat">聊天</button>
-  <button data-tab="groups">群聊</button>
   <button data-tab="schedule">日程</button>
   <button data-tab="guard">守护</button>
   <button data-tab="logs">日志</button>
@@ -265,28 +235,12 @@
         <button class="ghost" id="btnChatReload">刷新</button>
         <button class="ghost danger" id="btnChatClear">清空</button>
       </div>
-      <div class="hint">点一个人只看他的聊天，再点一次取消；消息先按 会话（群聊 / 私聊）分开，再按 年 → 月 → 日 折起来，日期从新到旧。</div>
+      <div class="hint">点一个人只看他的聊天，再点一次取消；每个人的聊天按 年 → 月 → 日 折起来，日期从新到旧。</div>
       <div class="personbar" id="chatPersons"></div>
       <div class="hint" id="chatWho"></div>
       <div class="hint">原始记录保留 14 天；3 天前的会按天压成一条摘要（标「摘要」），到期后彻底删除。</div>
     </div>
     <div class="card"><div id="chatList" class="list"></div></div>
-  </section>
-
-  <section class="panel" id="panel-groups">
-    <div class="card">
-      <div class="row">
-        <select id="groupPick" style="max-width:260px"><option value="">全部群</option></select>
-        <input class="grow" id="groupSearch" placeholder="搜群号 / 消息关键词">
-        <button class="ghost" id="btnGroupReload">刷新</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <input class="grow" id="groupRename" placeholder="给选中的群起个名字（平台不给群名时用它）">
-        <button class="ghost" id="btnGroupRename">保存群名</button>
-      </div>
-      <div class="hint">群聊消息按「群名 → 年 → 月 → 日」收纳，和私聊完全分开；平台没给群名时用群号，也可以手动起名。</div>
-    </div>
-    <div class="card"><div id="groupList" class="list"></div></div>
   </section>
 
   <section class="panel" id="panel-schedule">
@@ -307,15 +261,6 @@
     </div>
   </section>
 
-  <section class="panel" id="panel-guard">
-    <div class="card">
-      <div class="guard-sub">
-        <button class="active" data-guard="finance">金融</button>
-      </div>
-      <div id="guardList" class="hint">正在读她记得的账……</div>
-    </div>
-  </section>
-
   <section class="panel" id="panel-backup">
     <div class="card">
       <div class="row">
@@ -328,6 +273,18 @@
       <div class="hint">每天自动备份一次，保留最近 7 份，放在 plugin_data/Astr_Amo_data/backups/；恢复是合并语义，不会删现有记忆。</div>
     </div>
     <div class="card"><div id="backupList" class="list"></div></div>
+  </section>
+
+  <section class="panel" id="panel-guard">
+    <div class="card">
+      <div class="guard-sub">
+        <button class="active" data-guard="news">新闻</button>
+        <button data-guard="ledger">账目</button>
+        <button data-guard="pnl">持仓盈亏</button>
+        <button data-guard="key">关键节点</button>
+      </div>
+      <div id="guardList" class="hint">正在读她记得的账……</div>
+    </div>
   </section>
 
   <section class="panel" id="panel-logs">
@@ -448,7 +405,7 @@ const WRITE_ACTIONS = new Set([
   "person/link", "person/unlink", "person/merge",
   "relation/save", "relation/delete", "message/delete", "message/clear",
   "log/delete", "log/clear", "schedule/delete", "maintenance",
-  "memory/backfill_platform", "group/rename",
+  "memory/backfill_platform",
 ]);
 
 async function bridgeCall(action, payload) {
@@ -558,7 +515,6 @@ document.querySelectorAll("nav button").forEach((btn) => {
     if (tab === "persons") loadPersons();
     if (tab === "relations") loadRelations();
     if (tab === "chat") loadChat();
-    if (tab === "groups") loadGroups();
     if (tab === "schedule") loadSchedule();
     if (tab === "guard") loadGuard();
     if (tab === "logs") loadLogs();
@@ -575,11 +531,42 @@ function guardMemoryLine(item) {
   const m = document.createElement("div");
   m.className = "m";
   const kind = String(item.kind || "");
-  const label = kind === "finance_trade" ? "交易" : (kind === "finance_pnl" ? "收盘盈亏" : "账目");
+  const label = kind === "finance_news" ? "新闻"
+    : (kind === "finance_permanent" ? "关键节点"
+    : (kind === "finance_short" ? "持仓盈亏"
+    : (kind === "finance_trade" ? "交易" : "账目")));
   m.textContent = fmtTime(item.created_at) + " · " + label;
   row.appendChild(t);
   row.appendChild(m);
   return row;
+}
+
+let guardItems = [];
+let guardCat = "news";
+
+function guardCatOf(kind) {
+  const k = String(kind || "");
+  if (k.indexOf("finance_news") === 0) return "news";
+  if (k.indexOf("finance_short") === 0) return "pnl";
+  if (k.indexOf("finance_permanent") === 0) return "key";
+  if (k.indexOf("finance_") === 0) return "ledger";
+  return "";
+}
+
+function renderGuard() {
+  const box = document.getElementById("guardList");
+  if (!box) return;
+  const items = guardItems.filter((item) => guardCatOf(item && item.kind) === guardCat);
+  box.innerHTML = "";
+  if (!items.length) {
+    box.innerHTML = '<div class="empty">还没有' + ({ news: "新闻", ledger: "账目", pnl: "持仓盈亏", key: "关键节点" }[guardCat] || "") + '记录。</div>';
+    return;
+  }
+  box.appendChild(buildDayTree(items, (item) => guardMemoryLine(item), {
+    withinDay: "desc",
+    closed: true,
+    emptyText: "还没有记录。",
+  }));
 }
 
 async function loadGuard() {
@@ -588,20 +575,20 @@ async function loadGuard() {
   box.textContent = "正在读她记得的账……";
   try {
     const data = objectFrom(await call("memories", { q: "" })) || {};
-    const items = (data.items || []).filter((item) => String((item && item.kind) || "").indexOf("finance") === 0);
-    box.innerHTML = "";
-    if (!items.length) {
-      box.innerHTML = '<div class="empty">还没有金融记忆。等她发工资、买东西或者交易之后，这里会出现。</div>';
-      return;
-    }
-    box.appendChild(buildDayTree(items, (item) => guardMemoryLine(item), {
-      withinDay: "desc",
-      emptyText: "还没有金融记忆。",
-    }));
+    guardItems = (data.items || []).filter((item) => String((item && item.kind) || "").indexOf("finance") === 0);
+    renderGuard();
   } catch (error) {
     box.innerHTML = '<div class="empty">记忆接口未就绪：' + (error.message || error) + "</div>";
   }
 }
+
+document.querySelectorAll("#panel-guard [data-guard]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    guardCat = btn.dataset.guard;
+    document.querySelectorAll("#panel-guard [data-guard]").forEach((b) => b.classList.toggle("active", b === btn));
+    renderGuard();
+  });
+});
 
 async function loadStatus() {
   try {
@@ -677,7 +664,6 @@ function toggleNode(head, body) {
 }
 function buildDayTree(items, renderItem, opts) {
   const options = opts || {};
-  const lv = (n) => Math.min(3, n + (Number(options.levelOffset) || 0));
   const wrap = document.createElement("div");
   wrap.className = "tree";
   const groups = groupByDay(items, options.withinDay);
@@ -686,23 +672,25 @@ function buildDayTree(items, renderItem, opts) {
     return wrap;
   }
   let newestDayShown = false;
+  const startOpen = !options.closed;
   groups.forEach((yearNode) => {
-    const yearHead = makeToggle(yearNode.year + " 年", yearNode.total + " 条", false, lv(1));
+    const yearHead = makeToggle(yearNode.year + " 年", yearNode.total + " 条", startOpen, 1);
     const yearBody = document.createElement("div");
     yearBody.className = "tree-body";
-    yearBody.hidden = true;
+    yearBody.hidden = !startOpen;
     yearHead.addEventListener("click", () => toggleNode(yearHead, yearBody));
     wrap.appendChild(yearHead); wrap.appendChild(yearBody);
     yearNode.months.forEach((monthNode) => {
-      const monthHead = makeToggle(monthNode.month + " 月", monthNode.total + " 条", false, lv(2));
+      const monthHead = makeToggle(monthNode.month + " 月", monthNode.total + " 条", startOpen, 2);
       const monthBody = document.createElement("div");
       monthBody.className = "tree-body";
-      monthBody.hidden = true;
+      monthBody.hidden = !startOpen;
       monthHead.addEventListener("click", () => toggleNode(monthHead, monthBody));
       yearBody.appendChild(monthHead); yearBody.appendChild(monthBody);
       monthNode.days.forEach((dayNode) => {
-        const open = false;
-        const dayHead = makeToggle(dayNode.month + "月" + dayNode.day + " 日", dayNode.items.length + " 条", open, lv(3));
+        const open = startOpen && !newestDayShown;
+        if (startOpen) newestDayShown = true;
+        const dayHead = makeToggle(dayNode.month + "月" + dayNode.day + " 日", dayNode.items.length + " 条", open, 3);
         const dayBody = document.createElement("div");
         dayBody.className = "tree-body";
         dayBody.hidden = !open;
@@ -717,51 +705,6 @@ function buildDayTree(items, renderItem, opts) {
   });
   return wrap;
 }
-/* ---------- 会话分组：先分「群聊 / 私聊」，再按 年 → 月 → 日 ---------- */
-function sessionLabel(list) {
-  const item = Array.isArray(list) ? (list[0] || {}) : (list || {});
-  const umo = String((item && item.umo) || "");
-  const plat = String((item && (item.label || item.platform)) || "");
-  const group = umo.match(/:GroupMessage:([^:]+)$/);
-  if (group) return "群聊 · " + (plat ? plat + " " : "") + group[1];
-  if (/:FriendMessage:/.test(umo)) return (plat || "私聊") + " 私聊";
-  return (plat ? plat + " 会话" : (umo || "会话"));
-}
-function buildSessionTree(items, renderItem, opts) {
-  const options = opts || {};
-  const wrap = document.createElement("div");
-  wrap.className = "tree";
-  if (!items || !items.length) {
-    wrap.innerHTML = '<div class="empty">' + (options.emptyText || "还没有记录。") + "</div>";
-    return wrap;
-  }
-  const groups = new Map();
-  items.forEach((item) => {
-    const key = String((item && item.umo) || (item && item.platform) || "unknown");
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  const labelOf = typeof options.sessionLabel === "function" ? options.sessionLabel : sessionLabel;
-  const newest = (list) => list.reduce((max, one) => Math.max(max, tsOf(one)), 0);
-  Array.from(groups.values())
-    .sort((a, b) => newest(b) - newest(a))
-    .forEach((list) => {
-      const head = makeToggle(labelOf(list), list.length + " 条", false, 1);
-      const body = document.createElement("div");
-      body.className = "tree-body";
-      body.hidden = true;
-      head.addEventListener("click", () => toggleNode(head, body));
-      body.appendChild(buildDayTree(list, renderItem, {
-        levelOffset: 1,
-        withinDay: options.withinDay,
-        emptyText: options.emptyText,
-      }));
-      wrap.appendChild(head);
-      wrap.appendChild(body);
-    });
-  return wrap;
-}
-
 function messageLine(msg, onDelete) {
   const line = document.createElement("div");
   line.className = "msg";
@@ -818,10 +761,9 @@ function renderProfileTree(box, items, index) {
   const tree = document.createElement("div");
   tree.className = "tree tree-flat";
   ordered.forEach((group) => {
-    const head = makeToggle(group.label, group.items.length + " 人", false, 1);
+    const head = makeToggle(group.label, group.items.length + " 人", true, 1);
     const body = document.createElement("div");
     body.className = "tree-body";
-    body.hidden = true;
     head.addEventListener("click", () => toggleNode(head, body));
     group.items.forEach((item) => {
       const row = document.createElement("div");
@@ -1042,7 +984,7 @@ async function personMessageTree(pid, fallback) {
     empty.textContent = "还没有共同聊天记录。";
     return empty;
   }
-  return buildSessionTree(items, (msg) => messageLine(msg), { emptyText: "还没有共同聊天记录。" });
+  return buildDayTree(items, (msg) => messageLine(msg), { emptyText: "还没有共同聊天记录。" });
 }
 
 async function openPerson(pid) {
@@ -1158,9 +1100,9 @@ function relGlowColor(relation) {
 function drawStarfield(ctx, width, height, now) {
   // 深空底色：偏冷的天顶 + 更暗的地平线
   const base = ctx.createLinearGradient(0, 0, width, height);
-  base.addColorStop(0, "#101a33");
-  base.addColorStop(0.45, "#0d1526");
-  base.addColorStop(1, "#070c18");
+  base.addColorStop(0, "#070512");
+  base.addColorStop(0.45, "#0b0920");
+  base.addColorStop(1, "#04030b");
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, width, height);
 
@@ -1170,16 +1112,16 @@ function drawStarfield(ctx, width, height, now) {
   ctx.rotate(-0.48);
   const band = ctx.createLinearGradient(0, -height * 0.24, 0, height * 0.24);
   band.addColorStop(0, "rgba(80,70,150,0)");
-  band.addColorStop(0.32, "rgba(110,96,180,0.12)");
-  band.addColorStop(0.5, "rgba(190,205,255,0.18)");
-  band.addColorStop(0.68, "rgba(90,130,190,0.12)");
+  band.addColorStop(0.32, "rgba(110,96,180,0.10)");
+  band.addColorStop(0.5, "rgba(205,186,255,0.16)");
+  band.addColorStop(0.68, "rgba(90,130,190,0.10)");
   band.addColorStop(1, "rgba(50,50,110,0)");
   ctx.fillStyle = band;
   ctx.fillRect(-width, -height * 0.24, width * 2, height * 0.48);
   ctx.restore();
 
   // 超低透明度星云叠层，避免出现明显圆斑
-  [[0.30, 0.30, "#7b5cff", 0.06], [0.72, 0.68, "#3a8fd0", 0.05], [0.5, 0.5, "#ff7fc0", 0.035]].forEach(([rx, ry, color, alpha]) => {
+  [[0.30, 0.30, "#7b5cff", 0.055], [0.72, 0.68, "#3a8fd0", 0.045], [0.5, 0.5, "#ff7fc0", 0.03]].forEach(([rx, ry, color, alpha]) => {
     const neb = ctx.createRadialGradient(width * rx, height * ry, 2, width * rx, height * ry, Math.max(width, height) * 0.62);
     neb.addColorStop(0, color);
     neb.addColorStop(1, "rgba(0,0,0,0)");
@@ -1400,8 +1342,7 @@ function drawGraph(ctx, graph, width, height, camera, hoverId, labelColor, now) 
   ordered.forEach((node) => {
     const active = node.id === activeId;
     const scale = Math.max(0.45, node.pscale);
-    // 所有节点一样大（原来 bot 节点 7、别人 5，看着"你"更大）
-    const radius = (active ? 8.5 : 6) * scale;
+    const radius = (active ? 8.5 : node.id === "bot" ? 7 : 5) * scale;
     const color = node.id === "bot" ? "#ff7fb5" : relGlowColor(node.relation);
     const glow = ctx.createRadialGradient(node.px, node.py, 0, node.px, node.py, radius * 3.2);
     glow.addColorStop(0, color);
@@ -1658,7 +1599,7 @@ function openRelNode(id) {
     relation.textContent = edge.relation || "朋友";
     const arrow = document.createElement("span");
     arrow.className = "edge-arrow";
-    arrow.textContent = "";  // 箭头由 CSS 画（线 + 两个箭头），宽度自动撑满两侧
+    arrow.textContent = "↔";
     center.appendChild(relation);
     center.appendChild(arrow);
     if (edge.note) {
@@ -1774,16 +1715,12 @@ async function loadChat() {
   }
   try {
     const umo = (document.getElementById("chatUmo").value || "").trim();
-    const payload = chatPid
-      ? { pid: chatPid, limit: 300 }
-      : { umo, limit: 300, kind: umo ? "" : "private" };
+    const payload = chatPid ? { pid: chatPid, limit: 300 } : { umo, limit: 300 };
     const data = objectFrom(await call("messages", payload)) || {};
-    let items = Array.isArray(data.items) ? data.items : [];
-    // 没指定会话时，聊天页只显示私聊；群聊统一去「群聊」页
-    if (!umo) items = items.filter((it) => !String((it && it.umo) || "").includes(":GroupMessage:"));
+    const items = Array.isArray(data.items) ? data.items : [];
     box.textContent = "";
     if (!items.length) { box.innerHTML = '<div class="empty">还没有聊天记录。</div>'; return; }
-    box.appendChild(buildSessionTree(items, (item) => messageLine(item, async (one) => {
+    box.appendChild(buildDayTree(items, (item) => messageLine(item, async (one) => {
       try {
         await call("message/delete", { id: one.id });
         loadChat();
@@ -1808,120 +1745,6 @@ document.getElementById("btnChatClear").addEventListener("click", async () => {
     loadChat();
     loadStatus();
   } catch (error) { toast("清空失败：" + error.message, true); }
-});
-
-/* ---------- 群聊（群名 → 年 → 月 → 日） ---------- */
-function groupLabel(list) {
-  const items = Array.isArray(list) ? list : [list || {}];
-  const item = items[0] || {};
-  const umo = String(item.umo || "");
-  const plat = String(item.label || item.platform || "");
-  const matched = umo.match(/:GroupMessage:([^:]+)$/);
-  // 群名可能只在某几条消息上有（她自己的回复就没有），扫一遍取第一个非空的
-  const named = items.find((one) => String((one && one.group_name) || "").trim());
-  // 手动起的名字 > 平台给的群名 > 群号
-  const manual = String(((window._groupNames || {})[umo]) || "").trim();
-  const name = manual || String((named && named.group_name) || "").trim()
-    || (matched ? "群号 " + matched[1] : "未知群");
-  return (plat ? plat + " · " : "") + name;
-}
-
-async function fetchGroupMessages(force) {
-  // 群消息一次拉全（服务端已按群过滤），搜索在本地过滤，不再每敲一个字就请求一遍
-  if (!force && Array.isArray(window._groupMsgs)) return window._groupMsgs;
-  const data = objectFrom(await call("messages", { kind: "group", limit: 800 })) || {};
-  window._groupMsgs = Array.isArray(data.items) ? data.items : [];
-  return window._groupMsgs;
-}
-
-function renderGroupOptions(items) {
-  const select = document.getElementById("groupPick");
-  if (!select) return;
-  const keep = select.value;
-  const map = new Map();
-  items.forEach((it) => {
-    const key = String((it && it.umo) || "");
-    if (!key) return;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(it);
-  });
-  select.textContent = "";
-  const head = document.createElement("option");
-  head.value = "";
-  head.textContent = map.size ? "全部群（" + map.size + "）" : "全部群";
-  select.appendChild(head);
-  Array.from(map.entries())
-    .sort((a, b) => b[1].length - a[1].length)
-    .forEach(([umo, list]) => {
-      const opt = document.createElement("option");
-      opt.value = umo;
-      opt.textContent = groupLabel(list) + " · " + list.length + " 条";
-      select.appendChild(opt);
-    });
-  const stillThere = Array.from(select.options).some((one) => one.value === keep);
-  if (keep && stillThere) select.value = keep;
-}
-
-async function loadGroups(force) {
-  const box = document.getElementById("groupList");
-  box.textContent = "读取中…";
-  try {
-    const keyword = (document.getElementById("groupSearch").value || "").trim().toLowerCase();
-    try {
-      const meta = objectFrom(await call("groups")) || {};
-      window._groupNames = meta.names || {};
-    } catch (error) {
-      window._groupNames = window._groupNames || {};
-    }
-    const all = (await fetchGroupMessages(force === true))
-      .filter((it) => String((it && it.umo) || "").includes(":GroupMessage:"));
-    renderGroupOptions(all);
-    const picked = (document.getElementById("groupPick").value || "").trim();
-    let items = picked ? all.filter((it) => String((it && it.umo) || "") === picked) : all;
-    if (keyword) {
-      items = items.filter((it) =>
-        String((it && it.umo) || "").toLowerCase().includes(keyword)
-        || String((it && it.content) || "").toLowerCase().includes(keyword));
-    }
-    box.textContent = "";
-    if (!items.length) {
-      box.innerHTML = '<div class="empty">还没有群聊消息。群里的消息会自动收到这里（按群名 → 年 → 月 → 日）。</div>';
-      return;
-    }
-    box.appendChild(buildSessionTree(items, (item) => messageLine(item, async (one) => {
-      try {
-        await call("message/delete", { id: one.id });
-        loadGroups();
-      } catch (error) { toast("删除失败：" + error.message, true); }
-    }), { emptyText: "还没有群聊消息。", sessionLabel: groupLabel }));
-  } catch (error) {
-    box.textContent = "读取失败：" + error.message;
-  }
-}
-document.getElementById("btnGroupReload").addEventListener("click", () => loadGroups(true));
-document.getElementById("groupPick").addEventListener("change", () => {
-  const pick = document.getElementById("groupPick");
-  const box = document.getElementById("groupRename");
-  if (pick && box) box.value = String(((window._groupNames || {})[pick.value]) || "");
-  loadGroups(false);
-});
-document.getElementById("btnGroupRename").addEventListener("click", async () => {
-  const pick = document.getElementById("groupPick");
-  const umo = pick ? pick.value : "";
-  const name = (document.getElementById("groupRename").value || "").trim();
-  if (!umo) { toast("先在左边选一个群", true); return; }
-  if (!name) { toast("名字不能为空", true); return; }
-  try {
-    await call("group/rename", { umo, name });
-    window._groupNames = window._groupNames || {};
-    window._groupNames[umo] = name;
-    toast("已保存群名");
-    loadGroups(false);
-  } catch (error) { toast("保存失败：" + error.message, true); }
-});
-document.getElementById("groupSearch").addEventListener("input", () => {
-  clearTimeout(window._gt);
-  window._gt = setTimeout(loadGroups, 250);
 });
 
 /* ---------- 日程 ---------- */
