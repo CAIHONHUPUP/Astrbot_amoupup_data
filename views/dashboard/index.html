@@ -20,6 +20,13 @@
               border-radius:11px; font-size:13px; cursor:pointer; white-space:nowrap; box-shadow:0 1px 2px rgba(30,80,130,.04); }
   nav button:hover { border-color:#bfe3fa; background:var(--soft); }
   nav button.active { border-color:var(--pink); color:var(--pink); background:#f0faff; }
+  .guard-sub { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .guard-sub button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:6px 14px;
+                      border-radius:10px; font-size:13px; cursor:pointer; }
+  .guard-sub button.active { border-color:var(--pink); color:var(--pink); background:#f0faff; font-weight:600; }
+  .guard-mem { padding:7px 0; border-bottom:1px dashed var(--line); }
+  .guard-mem .t { font-size:13px; line-height:1.6; }
+  .guard-mem .m { font-size:11px; color:var(--muted); margin-top:2px; }
   main { padding:12px 16px 40px; }
   .panel { display:none; }
   .panel.active { display:block; }
@@ -133,6 +140,7 @@
   <button data-tab="chat">聊天</button>
   <button data-tab="groups">群聊</button>
   <button data-tab="schedule">日程</button>
+  <button data-tab="guard">守护</button>
   <button data-tab="logs">日志</button>
   <button data-tab="backup">备份</button>
 </nav>
@@ -296,6 +304,15 @@
         <button class="ghost" id="btnSchedClose">关闭</button>
       </div>
       <textarea id="schedBody" rows="14" readonly></textarea>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-guard">
+    <div class="card">
+      <div class="guard-sub">
+        <button class="active" data-guard="finance">金融</button>
+      </div>
+      <div id="guardList" class="hint">正在读她记得的账……</div>
     </div>
   </section>
 
@@ -543,10 +560,48 @@ document.querySelectorAll("nav button").forEach((btn) => {
     if (tab === "chat") loadChat();
     if (tab === "groups") loadGroups();
     if (tab === "schedule") loadSchedule();
+    if (tab === "guard") loadGuard();
     if (tab === "logs") loadLogs();
     if (tab === "backup") loadBackups();
   });
 });
+
+function guardMemoryLine(item) {
+  const row = document.createElement("div");
+  row.className = "guard-mem";
+  const t = document.createElement("div");
+  t.className = "t";
+  t.textContent = item.content || "";
+  const m = document.createElement("div");
+  m.className = "m";
+  const kind = String(item.kind || "");
+  const label = kind === "finance_trade" ? "交易" : (kind === "finance_pnl" ? "收盘盈亏" : "账目");
+  m.textContent = fmtTime(item.created_at) + " · " + label;
+  row.appendChild(t);
+  row.appendChild(m);
+  return row;
+}
+
+async function loadGuard() {
+  const box = document.getElementById("guardList");
+  if (!box) return;
+  box.textContent = "正在读她记得的账……";
+  try {
+    const data = objectFrom(await call("memories", { q: "" })) || {};
+    const items = (data.items || []).filter((item) => String((item && item.kind) || "").indexOf("finance") === 0);
+    box.innerHTML = "";
+    if (!items.length) {
+      box.innerHTML = '<div class="empty">还没有金融记忆。等她发工资、买东西或者交易之后，这里会出现。</div>';
+      return;
+    }
+    box.appendChild(buildDayTree(items, (item) => guardMemoryLine(item), {
+      withinDay: "desc",
+      emptyText: "还没有金融记忆。",
+    }));
+  } catch (error) {
+    box.innerHTML = '<div class="empty">记忆接口未就绪：' + (error.message || error) + "</div>";
+  }
+}
 
 async function loadStatus() {
   try {
