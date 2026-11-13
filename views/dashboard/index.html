@@ -682,7 +682,7 @@ function groupByDay(items, withinDay) {
             month,
             day,
             items: (days.get(day) || []).slice()
-              .sort((a, b) => (withinDay === "desc" ? tsOf(b) - tsOf(a) : tsOf(a) - tsOf(b))),
+              .sort((a, b) => (withinDay === "asc" ? tsOf(a) - tsOf(b) : tsOf(b) - tsOf(a))),
           })),
         };
       }),
@@ -801,7 +801,10 @@ function messageLine(msg, onDelete) {
   const who = document.createElement("div");
   who.className = "who";
   const plat = msg.label || msg.platform || "";
-  const speaker = msg.role === "bot" ? "她" : (msg.name || msg.uid || "他");
+  const rawName = String(msg.name || msg.uid || "");
+  const openIdLike = /^ou_[0-9a-zA-Z]/i.test(rawName);
+  const speaker = msg.role === "bot" ? "她"
+    : (msg.role === "user" && openIdLike ? "你" : (rawName || "他"));
   who.textContent = speaker + (plat ? " · " + plat : "");
   const txt = document.createElement("div");
   txt.className = "txt";
