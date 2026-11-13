@@ -4,6 +4,8 @@
 
 > GitHub：https://github.com/CAIHONHUPUP/Astrbot_amoupup_data
 
+> 发版流程、安装包/源码包区别、CI 检查项：见 [docs/RELEASING.md](docs/RELEASING.md)
+
 ## 3.0.0 记忆按人物归档 + 群聊分类面板
 
 - 记忆主键升级到 pid（人物），老数据自动回填；启动自愈人物表/孤儿记忆/幽灵人物；面板新 UI，消息按「会话 → 年 → 月 → 日」折叠；新增「群聊」页与群名采集/手动命名。
