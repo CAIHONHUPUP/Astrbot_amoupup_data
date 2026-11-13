@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing import Optional
 
 import asyncio
@@ -1068,8 +1068,8 @@ class AmoDataPlugin(Star):
                 profile_rel[key] = rel
         if profile_rel:
             pairs = {}
-            for item in items:
-                pairs[frozenset((str(item.get("a_uid") or ""), str(item.get("b_uid") or "")))] = item
+            for pair_item in items:
+                pairs[frozenset((str(pair_item.get("a_uid") or ""), str(pair_item.get("b_uid") or "")))] = pair_item
             for key, rel in profile_rel.items():
                 if key in ("bot", "self"):
                     continue
@@ -1241,7 +1241,7 @@ class AmoDataPlugin(Star):
         """手动跑一次保留策略：压缩老聊天 + 删过期日志。"""
         payload = await self._body()
         bot_id = self._bot_id(payload, write=True)
-        result = {}
+        result: dict[str, Any] = {}
         try:
             result.update(self.store.compress_messages(bot_id, self.compress_after, self.chat_days))
         except Exception as exc:

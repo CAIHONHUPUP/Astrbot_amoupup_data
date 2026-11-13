@@ -27,7 +27,8 @@ def main(argv):
     targets = [os.path.join(ROOT, arg) if arg.endswith(".py") else arg for arg in argv]
     cmd = [sys.executable, "-m", "mypy",
            "--config-file", os.path.join(ROOT, "mypy.ini"),
-           "--explicit-package-bases", "--exclude", EXCLUDE]
+           "--explicit-package-bases", "--check-untyped-defs",
+           "--exclude", EXCLUDE]
     cmd += targets or [ROOT]
     return subprocess.call(cmd, env=env, cwd=PARENT)
 

@@ -124,9 +124,10 @@ def restore():
         if prev is None:
             os.environ.pop("TZ", None)
         else:
-            os.environ["TZ"] = prev
+            os.environ["TZ"] = str(prev)
         try:
-            _time.tzset()
+            if hasattr(_time, "tzset"):
+                _time.tzset()
         except Exception:
             pass
     _applied.update({"ok": False, "name": "", "prev": None})
@@ -163,11 +164,11 @@ def utc_offset_minutes(explicit=""):
     zone = get_zone(resolve_name(explicit))
     if zone is None:
         try:
-            return int(datetime.now().astimezone().utcoffset().total_seconds() // 60)
+            return int((datetime.now().astimezone().utcoffset() or timedelta(0)).total_seconds() // 60)
         except Exception:
             return 0
     try:
-        return int(datetime.now(zone).utcoffset().total_seconds() // 60)
+        return int((datetime.now(zone).utcoffset() or timedelta(0)).total_seconds() // 60)
     except Exception:
         return 0
 
