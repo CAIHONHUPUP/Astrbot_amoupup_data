@@ -232,7 +232,7 @@ class MemoryMixin(_StoreBase):
                 self._emb_warned = True
                 try:
                     logger.warning(
-                        "[想记] 连不上 embedding 服务 %s（%s）：语义召回已退回关键词，"
+                        "[能记] 连不上 embedding 服务 %s（%s）：语义召回已退回关键词，"
                         "记忆读写不受影响；装好服务或关掉 embedding_enabled 即可"
                         % (url, model)
                     )

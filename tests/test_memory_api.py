@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""想记的对外门面（main.py）：MemoryAPI 与插件配置/接口辅助。
+"""能记的对外门面（main.py）：MemoryAPI 与插件配置/接口辅助。
 
 store.py 的存储层有 147 项测试，但 main.py 之前是 0 覆盖——Amo 平时调的正是
 这一层（`plugin.mem.recall/remember`）。这里用真实临时库把门面逐条跑一遍，

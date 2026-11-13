@@ -1685,8 +1685,8 @@ async function deleteRelEdge() {
   const edge = relSelectedEdge;
   const left = edge.a_name || edge.a_uid || "";
   const right = edge.b_name || edge.b_uid || "";
-  // 删关系会两边一起删（想记 + 陪伴），点错一次就找不回来，先问一句
-  const ask = "确定删除「" + left + " ↔ " + right + "（" + (edge.relation || "朋友") + "）」这条关系吗？\n想记和陪伴两边都会删掉。";
+  // 删关系会两边一起删（能记 + 陪伴），点错一次就找不回来，先问一句
+  const ask = "确定删除「" + left + " ↔ " + right + "（" + (edge.relation || "朋友") + "）」这条关系吗？\n能记和陪伴两边都会删掉。";
   if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(ask)) {
     return;
   }
