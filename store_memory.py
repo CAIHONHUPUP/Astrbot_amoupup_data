@@ -322,6 +322,8 @@ class MemoryMixin(_StoreBase):
         importance: float = 0.5,
         scope: str = "private",
         group_id: str = "",
+        subject: str = "user",
+        platform: str = "",
         idem_key: str = "",
         created_at: Optional[int] = None,
         last_hit_at: Optional[int] = None,
@@ -332,10 +334,19 @@ class MemoryMixin(_StoreBase):
         if not text:
             return {"ok": False, "reason": "empty"}
         bot_id, uid = str(bot_id), str(uid)
+        platform = str(platform or "").strip()
+        pid = 0
         try:
-            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+            if platform:
+                # 带平台来的写入：先把身份登记进人物表（写前强制 resolve），
+                # 再取主 uid；这样 QQ / 飞书说的是同一个人，pid 一致
+                pid = self.resolve_person(bot_id, platform, uid, "")
+                uid = self.canonical_uid(bot_id, platform, uid) or uid
+            else:
+                uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+                pid = self.pid_for_uid(bot_id, uid)
         except Exception:
-            pass
+            pid = 0
         scope = "group" if str(scope) == "group" else "private"
         group_id = str(group_id or "") if scope == "group" else ""
         try:
@@ -357,6 +368,7 @@ class MemoryMixin(_StoreBase):
         except (TypeError, ValueError):
             hit_count = 0
         idem_key = _clean(idem_key, 120)
+        subject = "bot" if str(subject or "").strip().lower() == "bot" else "user"
         if not idem_key and self.setting("auto_dedupe", True):
             idem_key = _norm_key(text)
 
@@ -372,8 +384,9 @@ class MemoryMixin(_StoreBase):
                     # 同一件事又说了一遍：抬一点重要度、刷新时间，不新增行
                     self.conn.execute(
                         "UPDATE memories SET importance=MAX(importance, ?), last_hit_at=?, "
-                        "merged_count=merged_count+1 WHERE id=?",
-                        (importance, now, int(row["id"])),
+                        "merged_count=merged_count+1, "
+                        "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
+                        (importance, now, subject, int(row["id"])),
                     )
                     self.conn.commit()
                     return {"ok": True, "memory_id": int(row["id"]), "duplicate": True}
@@ -392,22 +405,29 @@ class MemoryMixin(_StoreBase):
                     else:
                         self.conn.execute(
                             "UPDATE memories SET content=?, importance=MAX(importance, ?), "
-                            "last_hit_at=?, merged_count=merged_count+1 WHERE id=?",
-                            (text, importance, now, int(cand["id"])),
+                            "last_hit_at=?, merged_count=merged_count+1, "
+                            "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
+                            (text, importance, now, subject, int(cand["id"])),
                         )
                         self._enqueue_embedding(int(cand["id"]), text)
                     self.conn.commit()
                     return {"ok": True, "memory_id": int(cand["id"]), "duplicate": True}
 
+            subject = "bot" if str(subject or "").strip().lower() == "bot" else "user"
             cur = self.conn.execute(
-                "INSERT INTO memories(bot_id, uid, scope, group_id, kind, content, "
+                "INSERT INTO memories(bot_id, uid, pid, platform, scope, group_id, kind, subject, content, "
                 "importance, hit_count, created_at, last_hit_at, idem_key) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (bot_id, uid, scope, group_id, _clean(kind, 32) or "fact", text,
-                 importance, hit_count, created_at, last_hit_at, idem_key),
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (bot_id, uid, int(pid), platform, scope, group_id, _clean(kind, 32) or "fact",
+                 subject, text, importance, hit_count, created_at, last_hit_at, idem_key),
             )
             self.conn.commit()
             memory_id = int(cur.lastrowid or 0)
+            if self.setting("identity_debug", True):
+                logger.info(
+                    "[MEMORY_DEBUG] person_id=%s source_platform=%s hit=%s reason=write:%s",
+                    pid, platform or "unknown", 0, str(kind or "fact"),
+                )
         self._enqueue_embedding(memory_id, text)
         try:
             superseded = self._detect_supersede(bot_id, uid, scope, group_id, memory_id, text)
@@ -530,7 +550,7 @@ class MemoryMixin(_StoreBase):
         where, params = _bot_filter(bot_id)
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, bot_id, uid, content, kind, importance, created_at, last_hit_at, "
+                "SELECT id, bot_id, uid, content, kind, subject, importance, created_at, last_hit_at, "
                 "COALESCE(scope,'private') AS scope, COALESCE(group_id,'') AS group_id "
                 "FROM memories WHERE 1=1" + where +
                 " AND COALESCE(status,'active')='active'"
@@ -555,10 +575,11 @@ class MemoryMixin(_StoreBase):
                 )
                 for piece in pieces[1:]:
                     cur = self.conn.execute(
-                        "INSERT INTO memories(bot_id, uid, scope, group_id, kind, content, "
-                        "importance, hit_count, created_at, last_hit_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO memories(bot_id, uid, scope, group_id, kind, subject, content, "
+                        "importance, hit_count, created_at, last_hit_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (str(row["bot_id"]), str(row["uid"]), str(row["scope"]),
-                         str(row["group_id"]), str(row["kind"]), piece,
+                         str(row["group_id"]), str(row["kind"]),
+                         str(row["subject"] or "user"), piece,
                          float(row["importance"] or 0.5), 0,
                          int(row["created_at"] or _now()), int(row["last_hit_at"] or _now())),
                     )
@@ -706,6 +727,8 @@ class MemoryMixin(_StoreBase):
         limit: int = 6,
         scope: str = "",
         group_id: str = "",
+        platform: str = "",
+        pid: int = 0,
         half_life_days: Optional[float] = None,
         importance_decay: Optional[float] = None,
         pool_size: Optional[int] = None,
@@ -720,9 +743,15 @@ class MemoryMixin(_StoreBase):
         """
         bot_id, uid = str(bot_id), str(uid)
         try:
+            if not pid:
+                if platform:
+                    pid = self.person_pid(bot_id, platform, uid)
+                else:
+                    pid = self.pid_for_uid(bot_id, uid)
             uid = self.canonical_uid_for_uid(bot_id, uid) or uid
         except Exception:
-            pass
+            pid = 0
+        pid = int(pid or 0)
         limit = max(1, min(int(limit or 6), 100))
         text = _clean(query, 200)
         meta_query = bool(text) and bool(self.setting("meta_query_fallback", True)) \
@@ -746,20 +775,35 @@ class MemoryMixin(_StoreBase):
         # 自适应候选池：库小就全量精排，库大才截断（固定 400 会让老记忆永远进不了池）
         try:
             with self.lock:
-                total = int(self.conn.execute(
-                    "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND uid=? "
-                    "AND COALESCE(status,'active')='active'",
-                    (bot_id, uid),
-                ).fetchone()["n"])
+                if pid:
+                    total = int(self.conn.execute(
+                        "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND (pid=? OR "
+                        "(COALESCE(pid,0)=0 AND uid=?)) AND COALESCE(status,'active')='active'",
+                        (bot_id, pid, uid),
+                    ).fetchone()["n"])
+                else:
+                    total = int(self.conn.execute(
+                        "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND uid=? "
+                        "AND COALESCE(status,'active')='active'",
+                        (bot_id, uid),
+                    ).fetchone()["n"])
         except Exception:
             total = pool_size
         pool_size = max(limit, min(max(pool_size, total), 4000))
 
         base = (
-            "SELECT id, content, kind, importance, created_at, last_hit_at, hit_count, scope, group_id "
-            "FROM memories WHERE bot_id=? AND uid=? AND COALESCE(status,'active')='active'"
+            "SELECT id, content, kind, subject, importance, created_at, last_hit_at, hit_count, "
+            "scope, group_id, pid, platform "
+            "FROM memories WHERE bot_id=? AND COALESCE(status,'active')='active'"
         )
-        params: List[Any] = [bot_id, uid]
+        params: List[Any] = [bot_id]
+        if pid:
+            # 按人物取：新记忆靠 pid，老记忆（pid=0）靠 uid 兜底，别的 uid 一条都进不来
+            base += " AND (pid=? OR (COALESCE(pid,0)=0 AND uid=?))"
+            params.extend([int(pid), uid])
+        else:
+            base += " AND uid=?"
+            params.append(uid)
         if scope in ("private", "group"):
             base += " AND scope=?"
             params.append(scope)
@@ -969,6 +1013,11 @@ class MemoryMixin(_StoreBase):
                     [(now, item["id"]) for item in items],
                 )
                 self.conn.commit()
+        if self.setting("identity_debug", True):
+            logger.info(
+                "[MEMORY_DEBUG] person_id=%s source_platform=%s hit=%s reason=recall:%s",
+                pid, platform or "unknown", len(items), "meta" if meta_query else "query",
+            )
         return items
     def _meta_fallback(self, bot_id: str, uid: str, scope: str, group_id: str,
                        now: int, half_life_days: float, importance_decay: float) -> List[Dict[str, Any]]:
@@ -981,8 +1030,13 @@ class MemoryMixin(_StoreBase):
         if not self.setting("meta_query_fallback", True):
             return []
         limit = max(1, min(int(self.setting("meta_query_limit", 3) or 3), 10))
-        where = "bot_id=? AND uid=? AND COALESCE(status,'active')='active'"
-        params: List[Any] = [str(bot_id), str(uid)]
+        pid = self.pid_for_uid(bot_id, uid)
+        if pid:
+            where = "bot_id=? AND (pid=? OR (COALESCE(pid,0)=0 AND uid=?)) AND COALESCE(status,'active')='active'"
+            params: List[Any] = [str(bot_id), int(pid), str(uid)]
+        else:
+            where = "bot_id=? AND uid=? AND COALESCE(status,'active')='active'"
+            params = [str(bot_id), str(uid)]
         if scope in ("private", "group"):
             where += " AND scope=?"
             params.append(scope)
@@ -991,7 +1045,7 @@ class MemoryMixin(_StoreBase):
             params.append(str(group_id))
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id, content, kind, importance, created_at, last_hit_at, hit_count, scope, group_id "
+                "SELECT id, content, kind, subject, importance, created_at, last_hit_at, hit_count, scope, group_id "
                 "FROM memories WHERE " + where +
                 " ORDER BY importance DESC, last_hit_at DESC LIMIT ?",
                 params + [limit * 4],
@@ -1027,20 +1081,118 @@ class MemoryMixin(_StoreBase):
                 )
                 self.conn.commit()
         return picked
-    def list_memories(self, bot_id: str, uid: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+    def backfill_memory_platform(self, bot_id: str = "", window_sec: int = 600,
+                                 limit: int = 20000, apply: bool = True) -> Dict[str, Any]:
+        """给 platform 为空的老记忆补「来源平台」，只补能确定的那部分。
+
+        两条依据，任一成立才补：
+        1) 同一句话在 messages 里出现过 → 直接用那条消息的平台；
+        2) 写这条记忆的前后 window_sec 秒里，这个人只有某一个平台在说话 → 用那个平台。
+        两个平台都在说、或前后根本没有消息 → 保持空（未知来源），绝不猜。
+        """
+        clause, params = ("", []) if not bot_id else (" AND bot_id=?", [str(bot_id)])
+        result: Dict[str, Any] = {"scanned": 0, "filled": 0, "ambiguous": 0,
+                                  "unknown": 0, "applied": bool(apply)}
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, bot_id, uid, pid, kind, content, created_at FROM memories "
+                "WHERE COALESCE(platform,'')=''" + clause + " ORDER BY id DESC LIMIT ?",
+                list(params) + [max(1, min(int(limit), 20000))],
+            ).fetchall()
+            result["scanned"] = len(rows)
+            updates = []
+            # 摘要类记忆本来就跨平台，不能按"前后谁在说话"推平台
+            aggregate = {"conversation_summary", "daily_digest", "milestone",
+                         "relationship_phase_summary", "imported_memory"}
+            link_cache = {}
+            for row in rows:
+                bot = str(row["bot_id"])
+                pid = int(row["pid"] or 0)
+                uid = str(row["uid"] or "")
+                body = str(row["content"] or "")
+                kind = str(row["kind"] or "")
+                plat = ""
+                hit = self.conn.execute(
+                    "SELECT platform FROM messages WHERE bot_id=? AND COALESCE(platform,'')!='' "
+                    "AND content=? LIMIT 1", (bot, body),
+                ).fetchone()
+                if hit and str(hit["platform"] or "").strip():
+                    plat = str(hit["platform"]).strip()
+                # 2) 摘要类正文里会写参与者的 uid：只命中一个平台就用它
+                if not plat:
+                    ckey = (bot, pid)
+                    if ckey not in link_cache:
+                        if pid:
+                            link_cache[ckey] = self.conn.execute(
+                                "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
+                                (bot, pid)).fetchall()
+                        else:
+                            link_cache[ckey] = self.conn.execute(
+                                "SELECT platform, uid FROM person_links WHERE bot_id=? AND uid=?",
+                                (bot, uid)).fetchall()
+                    plats = {str(l["platform"]).strip() for l in link_cache[ckey]
+                             if str(l["uid"] or "") and str(l["uid"]) in body
+                             and str(l["platform"] or "").strip()}
+                    if len(plats) == 1:
+                        plat = plats.pop()
+                # 3) 前后 window_sec 只有一个平台在说话：单轮记忆才用，摘要类跳过
+                if not plat and kind not in aggregate:
+                    if pid:
+                        near = self.conn.execute(
+                            "SELECT DISTINCT platform FROM messages WHERE bot_id=? AND pid=? "
+                            "AND COALESCE(platform,'')!='' AND ABS(created_at-?)<=?",
+                            (bot, pid, int(row["created_at"] or 0), int(window_sec)),
+                        ).fetchall()
+                    else:
+                        near = self.conn.execute(
+                            "SELECT DISTINCT platform FROM messages WHERE bot_id=? AND uid=? "
+                            "AND COALESCE(platform,'')!='' AND ABS(created_at-?)<=?",
+                            (bot, uid, int(row["created_at"] or 0), int(window_sec)),
+                        ).fetchall()
+                    plats = {str(r["platform"]).strip() for r in near
+                             if str(r["platform"] or "").strip()}
+                    if len(plats) == 1:
+                        plat = plats.pop()
+                    elif len(plats) > 1:
+                        result["ambiguous"] += 1
+                        continue
+                if not plat:
+                    result["unknown"] += 1
+                    continue
+                updates.append((plat, int(row["id"])))
+            result["filled"] = len(updates)
+            if apply and updates:
+                self.conn.executemany(
+                    "UPDATE memories SET platform=? WHERE id=? AND COALESCE(platform,'')=''",
+                    updates,
+                )
+                self.conn.commit()
+        return result
+
+    def list_memories(self, bot_id: str, uid: str = "", limit: int = 100,
+                      pid: int = 0) -> List[Dict[str, Any]]:
         try:
-            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+            if not pid:
+                pid = self.pid_for_uid(bot_id, uid) if uid else 0
+            if uid:
+                uid = self.canonical_uid_for_uid(bot_id, uid) or uid
         except Exception:
             pass
         where, params = _bot_filter(bot_id)
         sql = (
-            "SELECT id, uid, content, kind, importance, created_at, hit_count, scope, group_id "
+            "SELECT id, uid, pid, platform, content, kind, subject, importance, created_at, "
+            "hit_count, scope, group_id "
             "FROM memories WHERE 1=1" + where
         )
-        if uid:
-            sql += " AND uid=?"
-            params.append(str(uid))
-        sql += " ORDER BY id DESC LIMIT ?"
+        if uid or pid:
+            # 按人取：有 pid 就按 pid（老行 pid=0 再用 uid 兜底），没 pid 就按 uid
+            if pid:
+                sql += " AND (pid=? OR (COALESCE(pid,0)=0 AND uid=?))"
+                params.extend([int(pid), str(uid)])
+            else:
+                sql += " AND uid=?"
+                params.append(str(uid))
+        sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
         params.append(max(1, min(int(limit), 500)))
         with self.lock:
             rows = self.conn.execute(sql, params).fetchall()

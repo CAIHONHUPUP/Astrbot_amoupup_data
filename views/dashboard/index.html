@@ -6,48 +6,77 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>我能永远记住你</title>
 <style>
-  :root { --bg:#f7f5f8; --card:#fff; --text:#2c2430; --muted:#8a8090; --line:#ebe4ee; --pink:#d4578a; }
+  :root { --bg:#eef8ff; --bg2:#e2f2ff; --card:#ffffff; --text:#2b3440; --muted:#7b8794;
+          --line:#dcecf9; --pink:#0ea5e9; --soft:#f2faff; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px; }
-  header { padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; }
+  body { margin:0; background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%); background-attachment:fixed;
+         color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px; }
+  header { padding:14px 16px; background:rgba(255,255,255,.82); backdrop-filter:blur(12px);
+           border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   .badge { font-size:11px; color:var(--muted); }
   nav { display:flex; gap:6px; padding:10px 16px 0; overflow-x:auto; }
-  nav button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:6px 12px; border-radius:8px; font-size:13px; cursor:pointer; white-space:nowrap; }
-  nav button.active { border-color:var(--pink); color:var(--pink); }
+  nav button { border:1px solid var(--line); background:var(--card); color:var(--text); padding:7px 13px;
+              border-radius:11px; font-size:13px; cursor:pointer; white-space:nowrap; box-shadow:0 1px 2px rgba(30,80,130,.04); }
+  nav button:hover { border-color:#bfe3fa; background:var(--soft); }
+  nav button.active { border-color:var(--pink); color:var(--pink); background:#f0faff; }
   main { padding:12px 16px 40px; }
   .panel { display:none; }
   .panel.active { display:block; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px; margin-bottom:10px;
+          box-shadow:0 6px 20px rgba(30,90,150,.06); }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .grow { flex:1; min-width:120px; }
-  input, select, textarea { width:100%; border:1px solid var(--line); border-radius:8px; padding:7px 9px; font-size:13px; background:#fff; color:var(--text); font-family:inherit; }
+  input, select, textarea { width:100%; border:1px solid var(--line); border-radius:11px; padding:8px 11px; font-size:13px;
+                          background:var(--card); color:var(--text); font-family:inherit; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:#9fd7f6; box-shadow:0 0 0 3px rgba(14,165,233,.10); }
   textarea { min-height:60px; resize:vertical; }
   label { display:block; font-size:12px; color:var(--muted); margin:6px 0 3px; }
-  button.primary { background:var(--pink); color:#fff; border:none; border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
-  button.ghost { background:transparent; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12px; cursor:pointer; color:var(--muted); }
-  button.danger { color:#c0392b; border-color:#f0d7d3; }
+  button.primary { background:var(--pink); color:#fff; border:none; border-radius:11px; padding:8px 16px; font-size:13px;
+                  cursor:pointer; box-shadow:0 4px 12px rgba(14,165,233,.28); }
+  button.primary:hover { filter:brightness(1.05); }
+  button.ghost { background:var(--card); border:1px solid var(--line); border-radius:11px; padding:7px 12px; font-size:12px;
+                cursor:pointer; color:var(--text); box-shadow:0 1px 2px rgba(30,80,130,.04); }
+  button.ghost:hover { background:var(--soft); border-color:#bfe3fa; }
+  button.danger { color:#e05780; border-color:#f6dbe5; }
+  button.danger:hover { background:#fff5f8; border-color:#f3c3d5; }
   .modal { position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(6,5,16,.66); backdrop-filter:blur(5px); }
   .modal[hidden] { display:none; }
   .modal-card { width:min(92vw,520px); max-height:82vh; overflow:auto; background:linear-gradient(165deg,#1e1938,#0c0918 72%); color:#f1ecff; border:1px solid rgba(255,255,255,0.14); border-radius:18px; padding:16px 18px; box-shadow:0 24px 70px rgba(0,0,0,0.55); }
   .modal-card .hint { color:#b9addb; }
-  .rel-node-edge { display:grid; grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:8px; padding:9px 10px; margin-top:6px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); cursor:pointer; }
+  .rel-node-edge { display:grid; grid-template-columns:auto auto minmax(60px,1fr) auto; align-items:center; gap:10px; padding:9px 12px; margin-top:6px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); cursor:pointer; }
   .rel-node-edge input { accent-color:#ff5fa2; }
   .rel-node-edge .edge-left { text-align:right; color:#f3edff; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .rel-node-edge .edge-right { text-align:left; color:#f3edff; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .rel-node-edge .edge-center { display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.15; min-width:64px; }
+  .rel-node-edge .edge-center { display:flex; flex-direction:column; align-items:center; justify-content:center;
+    line-height:1.15; min-width:0; width:100%; }
   .rel-node-edge .edge-relation { font-size:11px; color:#ffd6e8; background:rgba(255,95,162,0.18); border:1px solid rgba(255,95,162,0.38); border-radius:999px; padding:0 7px; margin-bottom:1px; }
-  .rel-node-edge .edge-arrow { color:#ff9cc6; font-size:15px; font-weight:600; }
+  /* 双向箭头：用 CSS 画一条线 + 两个箭头，宽度自动撑满两边的名字 */
+  .rel-node-edge .edge-arrow { position:relative; display:block; width:100%; height:0;
+    margin:5px 0 3px; border-top:2px solid #ff9cc6; font-size:0; line-height:0; }
+  .rel-node-edge .edge-arrow::before,
+  .rel-node-edge .edge-arrow::after { content:""; position:absolute; top:-6px; width:8px; height:8px;
+    border-top:2px solid #ff9cc6; border-right:2px solid #ff9cc6; }
+  .rel-node-edge .edge-arrow::before { left:0; transform:rotate(-135deg); }
+  .rel-node-edge .edge-arrow::after { right:0; transform:rotate(45deg); }
   .rel-node-edge .edge-note { color:#a99bd0; font-size:10px; margin-top:1px; white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
   .rel-node-delete { width:100%; margin-top:12px; padding:10px; border-radius:10px; font-weight:600; color:#ffd6e4; border:1px solid rgba(255,95,162,0.5); background:linear-gradient(90deg, rgba(255,95,162,0.22), rgba(255,95,162,0.08)); }
-  #panel-relations .card { background:radial-gradient(circle at 25% 15%, #251d46, #0b0817 72%); border-color:#2b2442; color:#efe9ff; }
-  #panel-relations .card .hint { color:#b5a9d6; }
-  #panel-relations .ghost { color:#e7dcff; border-color:rgba(255,255,255,0.2); }
-  #relGraph { border-radius:14px; box-shadow:inset 0 0 60px rgba(0,0,0,0.5); }
+  /* 关系网：深色星空卡片，用柔和的深蓝渐变 + 大投影浮在浅色页面上，过渡不生硬 */
+  #panel-relations .card { background:radial-gradient(circle at 28% 12%, #24304f 0%, #131a2e 55%, #0b1020 100%);
+    border-color:rgba(120,150,200,0.22); color:#e8eeff;
+    box-shadow:0 20px 56px rgba(16,32,64,0.30), 0 2px 6px rgba(16,32,64,0.16); }
+  #panel-relations .card .hint { color:#a9b7d4; }
+  /* 深色卡里的按钮：半透明深底 + 浅字，尺寸比浅色页上的小一号 */
+  #panel-relations .ghost { background:rgba(255,255,255,0.08); color:#e8eeff;
+    border:1px solid rgba(150,180,230,0.30); padding:4px 10px; font-size:11.5px;
+    border-radius:9px; box-shadow:none; line-height:1.4; }
+  #panel-relations .ghost:hover { background:rgba(150,180,230,0.20); border-color:rgba(150,180,230,0.52); color:#ffffff; }
+  #relGraph { border-radius:14px; box-shadow:inset 0 0 70px rgba(0,0,0,0.45); }
   .list { display:flex; flex-direction:column; gap:6px; }
-  .item { border:1px solid var(--line); border-radius:10px; padding:9px 10px; display:flex; gap:10px; align-items:center; cursor:pointer; background:#fff; }
-  .item:hover { border-color:#e0d3e6; }
-  .item .name { font-weight:600; font-size:13px; }
+  .item { border:1px solid var(--line); border-radius:12px; padding:10px 12px; display:flex; gap:10px; align-items:center;
+         cursor:pointer; background:var(--card); box-shadow:0 1px 2px rgba(30,80,130,.04); }
+  .item:hover { border-color:#bfe3fa; background:var(--soft); }
+  .item .name { font-weight:600; font-size:14px; }
   .item .sub { font-size:11px; color:var(--muted); margin-top:2px; word-break:break-all; }
   .msg { padding:7px 0; border-bottom:1px dashed var(--line); display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
   .msg:last-child { border-bottom:none; }
@@ -59,6 +88,32 @@
   .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); background:rgba(44,36,48,.92); color:#fff; padding:8px 14px; border-radius:8px; font-size:12px; opacity:0; transition:.2s; pointer-events:none; }
   .toast.show { opacity:1; }
   .hint { font-size:11px; color:var(--muted); margin-top:4px; }
+  /* 年月日多级菜单（画像 / 人物 / 聊天共用） */
+  .tree { display:flex; flex-direction:column; gap:2px; }
+  .tree-toggle { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:8px; cursor:pointer; user-select:none; }
+  .tree-toggle:hover { background:var(--soft); }
+  .tree-toggle .caret { width:10px; font-size:9px; color:var(--muted); transition:transform .15s; }
+  .tree-toggle.open .caret { transform:rotate(90deg); }
+  /* 层级越深字号越小：一级(平台/年) > 二级(月) > 三级(日) */
+  .tree-toggle.lv1 { padding:8px 8px; }
+  .tree-toggle.lv2 { padding:5px 8px; }
+  .tree-toggle.lv3 { padding:3px 8px; }
+  .tree-toggle.lv1 .label { font-size:16px; font-weight:700; }
+  .tree-toggle.lv2 .label { font-size:14px; font-weight:600; }
+  .tree-toggle.lv3 .label { font-size:13px; font-weight:500; }
+  /* 卡片标题比二级菜单再小一档，别压过条目 */
+  .card strong.grow { font-size:13px; }
+  .tree-toggle.lv1 .count { font-size:11px; color:var(--muted); margin-left:auto; }
+  .tree-toggle.lv2 .count, .tree-toggle.lv3 .count { font-size:10px; color:var(--muted); margin-left:auto; }
+  .tree-toggle.lv3 .caret { font-size:8px; }
+  .tree-body { padding-left:10px; display:flex; flex-direction:column; gap:2px; }
+  .tree-body > .item { margin-bottom:2px; }
+  /* 画像列表里的子项是卡片：不缩进，和下面「编辑画像」「记忆」两张卡左边缘对齐 */
+  .tree-flat > .tree-body { padding-left:0; }
+  .tree-body[hidden] { display:none; }
+  .personbar { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .personbar button { border:1px solid var(--line); background:#fff; color:var(--text); padding:5px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
+  .personbar button.active { border-color:var(--pink); color:var(--pink); background:#fdf4f8; }
 </style>
 <style id="amo-skyblue-theme">
   :root { --pink:#0ea5e9; --pink2:#38bdf8; --brand:#0ea5e9; }
@@ -76,6 +131,7 @@
   <button data-tab="profiles">画像</button>
   <button data-tab="persons">人物</button>
   <button data-tab="chat">聊天</button>
+  <button data-tab="groups">群聊</button>
   <button data-tab="schedule">日程</button>
   <button data-tab="logs">日志</button>
   <button data-tab="backup">备份</button>
@@ -88,7 +144,7 @@
         <input class="grow" id="search" placeholder="搜 uid / 称呼 / 备注">
         <button class="ghost" id="btnReload">刷新</button>
       </div>
-      <div class="hint">点一条进入编辑：改名字、称呼、关系，保存后立即写回库。</div>
+      <div class="hint">按平台分组：点平台展开名单，再点一条进入编辑（改名字、称呼、关系，保存后立即写回库）。</div>
     </div>
     <div class="list" id="profileList"></div>
 
@@ -117,6 +173,7 @@
     <div class="card" id="memories" hidden>
       <div class="row">
         <strong class="grow">记忆</strong>
+        <button class="ghost" id="btnBackfillPlat">回填来源</button>
         <button class="ghost" id="btnRefreshMem">刷新</button>
       </div>
       <div id="memList"></div>
@@ -200,9 +257,28 @@
         <button class="ghost" id="btnChatReload">刷新</button>
         <button class="ghost danger" id="btnChatClear">清空</button>
       </div>
+      <div class="hint">点一个人只看他的聊天，再点一次取消；消息先按 会话（群聊 / 私聊）分开，再按 年 → 月 → 日 折起来，日期从新到旧。</div>
+      <div class="personbar" id="chatPersons"></div>
+      <div class="hint" id="chatWho"></div>
       <div class="hint">原始记录保留 14 天；3 天前的会按天压成一条摘要（标「摘要」），到期后彻底删除。</div>
     </div>
     <div class="card"><div id="chatList" class="list"></div></div>
+  </section>
+
+  <section class="panel" id="panel-groups">
+    <div class="card">
+      <div class="row">
+        <select id="groupPick" style="max-width:260px"><option value="">全部群</option></select>
+        <input class="grow" id="groupSearch" placeholder="搜群号 / 消息关键词">
+        <button class="ghost" id="btnGroupReload">刷新</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input class="grow" id="groupRename" placeholder="给选中的群起个名字（平台不给群名时用它）">
+        <button class="ghost" id="btnGroupRename">保存群名</button>
+      </div>
+      <div class="hint">群聊消息按「群名 → 年 → 月 → 日」收纳，和私聊完全分开；平台没给群名时用群号，也可以手动起名。</div>
+    </div>
+    <div class="card"><div id="groupList" class="list"></div></div>
   </section>
 
   <section class="panel" id="panel-schedule">
@@ -355,6 +431,7 @@ const WRITE_ACTIONS = new Set([
   "person/link", "person/unlink", "person/merge",
   "relation/save", "relation/delete", "message/delete", "message/clear",
   "log/delete", "log/clear", "schedule/delete", "maintenance",
+  "memory/backfill_platform", "group/rename",
 ]);
 
 async function bridgeCall(action, payload) {
@@ -464,6 +541,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
     if (tab === "persons") loadPersons();
     if (tab === "relations") loadRelations();
     if (tab === "chat") loadChat();
+    if (tab === "groups") loadGroups();
     if (tab === "schedule") loadSchedule();
     if (tab === "logs") loadLogs();
     if (tab === "backup") loadBackups();
@@ -483,17 +561,214 @@ async function loadStatus() {
   }
 }
 
-/* ---------- 画像 ---------- */
-async function loadProfiles() {
-  const box = document.getElementById("profileList");
-  box.textContent = "读取中…";
+/* ---------- 年月日分组树（画像 / 人物 / 聊天共用） ---------- */
+function tsOf(item) { return Number((item && item.created_at) || 0) || 0; }
+function pad2(n) { return String(n).padStart(2, "0"); }
+function dayParts(ts) {
+  const d = new Date((Number(ts) || 0) * 1000);
+  return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+}
+function groupByDay(items, withinDay) {
+  const years = new Map();
+  (items || []).forEach((item) => {
+    const t = dayParts(tsOf(item));
+    if (!years.has(t.year)) years.set(t.year, new Map());
+    const months = years.get(t.year);
+    if (!months.has(t.month)) months.set(t.month, new Map());
+    const days = months.get(t.month);
+    if (!days.has(t.day)) days.set(t.day, []);
+    days.get(t.day).push(item);
+  });
+  const countOf = (days) => Array.from(days.values()).reduce((n, arr) => n + arr.length, 0);
+  return Array.from(years.keys()).sort((a, b) => b - a).map((year) => {
+    const months = years.get(year);
+    return {
+      year,
+      total: Array.from(months.values()).reduce((n, days) => n + countOf(days), 0),
+      months: Array.from(months.keys()).sort((a, b) => b - a).map((month) => {
+        const days = months.get(month);
+        return {
+          month,
+          total: countOf(days),
+          days: Array.from(days.keys()).sort((a, b) => b - a).map((day) => ({
+            month,
+            day,
+            items: (days.get(day) || []).slice()
+              .sort((a, b) => (withinDay === "desc" ? tsOf(b) - tsOf(a) : tsOf(a) - tsOf(b))),
+          })),
+        };
+      }),
+    };
+  });
+}
+function makeToggle(text, countText, open, level) {
+  const head = document.createElement("div");
+  head.className = "tree-toggle lv" + (Number(level) || 1) + (open ? " open" : "");
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  caret.textContent = "▶";
+  const label = document.createElement("span");
+  label.className = "label";
+  label.textContent = text;
+  const count = document.createElement("span");
+  count.className = "count";
+  count.textContent = countText || "";
+  head.appendChild(caret); head.appendChild(label); head.appendChild(count);
+  return head;
+}
+function toggleNode(head, body) {
+  body.hidden = !body.hidden;
+  head.classList.toggle("open", !body.hidden);
+}
+function buildDayTree(items, renderItem, opts) {
+  const options = opts || {};
+  const lv = (n) => Math.min(3, n + (Number(options.levelOffset) || 0));
+  const wrap = document.createElement("div");
+  wrap.className = "tree";
+  const groups = groupByDay(items, options.withinDay);
+  if (!groups.length) {
+    wrap.innerHTML = '<div class="empty">' + (options.emptyText || "还没有记录。") + "</div>";
+    return wrap;
+  }
+  let newestDayShown = false;
+  groups.forEach((yearNode) => {
+    const yearHead = makeToggle(yearNode.year + " 年", yearNode.total + " 条", false, lv(1));
+    const yearBody = document.createElement("div");
+    yearBody.className = "tree-body";
+    yearBody.hidden = true;
+    yearHead.addEventListener("click", () => toggleNode(yearHead, yearBody));
+    wrap.appendChild(yearHead); wrap.appendChild(yearBody);
+    yearNode.months.forEach((monthNode) => {
+      const monthHead = makeToggle(monthNode.month + " 月", monthNode.total + " 条", false, lv(2));
+      const monthBody = document.createElement("div");
+      monthBody.className = "tree-body";
+      monthBody.hidden = true;
+      monthHead.addEventListener("click", () => toggleNode(monthHead, monthBody));
+      yearBody.appendChild(monthHead); yearBody.appendChild(monthBody);
+      monthNode.days.forEach((dayNode) => {
+        const open = false;
+        const dayHead = makeToggle(dayNode.month + "月" + dayNode.day + " 日", dayNode.items.length + " 条", open, lv(3));
+        const dayBody = document.createElement("div");
+        dayBody.className = "tree-body";
+        dayBody.hidden = !open;
+        dayHead.addEventListener("click", () => toggleNode(dayHead, dayBody));
+        monthBody.appendChild(dayHead); monthBody.appendChild(dayBody);
+        dayNode.items.forEach((item) => {
+          const line = renderItem(item);
+          if (line) dayBody.appendChild(line);
+        });
+      });
+    });
+  });
+  return wrap;
+}
+/* ---------- 会话分组：先分「群聊 / 私聊」，再按 年 → 月 → 日 ---------- */
+function sessionLabel(list) {
+  const item = Array.isArray(list) ? (list[0] || {}) : (list || {});
+  const umo = String((item && item.umo) || "");
+  const plat = String((item && (item.label || item.platform)) || "");
+  const group = umo.match(/:GroupMessage:([^:]+)$/);
+  if (group) return "群聊 · " + (plat ? plat + " " : "") + group[1];
+  if (/:FriendMessage:/.test(umo)) return (plat || "私聊") + " 私聊";
+  return (plat ? plat + " 会话" : (umo || "会话"));
+}
+function buildSessionTree(items, renderItem, opts) {
+  const options = opts || {};
+  const wrap = document.createElement("div");
+  wrap.className = "tree";
+  if (!items || !items.length) {
+    wrap.innerHTML = '<div class="empty">' + (options.emptyText || "还没有记录。") + "</div>";
+    return wrap;
+  }
+  const groups = new Map();
+  items.forEach((item) => {
+    const key = String((item && item.umo) || (item && item.platform) || "unknown");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const labelOf = typeof options.sessionLabel === "function" ? options.sessionLabel : sessionLabel;
+  const newest = (list) => list.reduce((max, one) => Math.max(max, tsOf(one)), 0);
+  Array.from(groups.values())
+    .sort((a, b) => newest(b) - newest(a))
+    .forEach((list) => {
+      const head = makeToggle(labelOf(list), list.length + " 条", false, 1);
+      const body = document.createElement("div");
+      body.className = "tree-body";
+      body.hidden = true;
+      head.addEventListener("click", () => toggleNode(head, body));
+      body.appendChild(buildDayTree(list, renderItem, {
+        levelOffset: 1,
+        withinDay: options.withinDay,
+        emptyText: options.emptyText,
+      }));
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+    });
+  return wrap;
+}
+
+function messageLine(msg, onDelete) {
+  const line = document.createElement("div");
+  line.className = "msg";
+  const who = document.createElement("div");
+  who.className = "who";
+  const plat = msg.label || msg.platform || "";
+  const speaker = msg.role === "bot" ? "她" : (msg.name || msg.uid || "他");
+  who.textContent = speaker + (plat ? " · " + plat : "");
+  const txt = document.createElement("div");
+  txt.className = "txt";
+  txt.textContent = (msg.role === "summary" ? "【摘要】" : "") + (msg.content || "");
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = fmtTime(msg.created_at);
+  line.appendChild(who); line.appendChild(txt); line.appendChild(time);
+  if (typeof onDelete === "function") {
+    const del = document.createElement("button");
+    del.className = "ghost";
+    del.textContent = "删";
+    del.addEventListener("click", () => onDelete(msg));
+    line.appendChild(del);
+  }
+  return line;
+}
+async function platformIndex() {
+  // /profiles 不带平台字段：平台只能从人物表的身份映射里反查
+  const map = new Map();
   try {
-    const keyword = (document.getElementById("search").value || "").trim();
-    const data = objectFrom(await call("profiles", keyword ? { keyword } : undefined)) || {};
-    const items = Array.isArray(data.items) ? data.items : [];
-    box.textContent = "";
-    if (!items.length) { box.innerHTML = '<div class="empty">还没有画像。</div>'; return; }
-    items.forEach((item) => {
+    const data = objectFrom(await call("persons")) || {};
+    (data.items || []).forEach((person) => {
+      (person.links || []).forEach((link) => {
+        if (!link || !link.uid) return;
+        map.set(String(link.uid), {
+          platform: String(link.platform || ""),
+          label: String(link.label || link.platform || "未知"),
+        });
+      });
+    });
+  } catch (error) {}
+  return map;
+}
+function renderProfileTree(box, items, index) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const hit = index.get(String(item.uid)) || {};
+    const label = hit.label || "未绑定平台";
+    if (!groups.has(label)) groups.set(label, { label, items: [] });
+    groups.get(label).items.push(item);
+  });
+  const ordered = Array.from(groups.values()).sort((a, b) => {
+    if (b.items.length !== a.items.length) return b.items.length - a.items.length;
+    return String(a.label).localeCompare(String(b.label), "zh");
+  });
+  const tree = document.createElement("div");
+  tree.className = "tree tree-flat";
+  ordered.forEach((group) => {
+    const head = makeToggle(group.label, group.items.length + " 人", false, 1);
+    const body = document.createElement("div");
+    body.className = "tree-body";
+    body.hidden = true;
+    head.addEventListener("click", () => toggleNode(head, body));
+    group.items.forEach((item) => {
       const row = document.createElement("div");
       row.className = "item";
       const left = document.createElement("div");
@@ -503,16 +778,35 @@ async function loadProfiles() {
       name.textContent = item.name || item.alias || item.uid;
       const sub = document.createElement("div");
       sub.className = "sub";
-      sub.textContent = "UID " + item.uid + (item.relation ? " · " + item.relation : "") + (item.remark ? " · " + item.remark : "");
+      sub.textContent = "UID " + item.uid + (item.relation ? " · " + item.relation : "")
+        + (item.remark ? " · " + item.remark : "");
       left.appendChild(name); left.appendChild(sub);
       row.appendChild(left);
       row.addEventListener("click", () => openProfile(item.uid));
-      box.appendChild(row);
+      body.appendChild(row);
     });
+    tree.appendChild(head); tree.appendChild(body);
+  });
+  box.appendChild(tree);
+}
+async function loadProfiles() {
+  const box = document.getElementById("profileList");
+  box.textContent = "读取中…";
+  try {
+    const keyword = (document.getElementById("search").value || "").trim();
+    const [data, index] = await Promise.all([
+      call("profiles", keyword ? { keyword } : undefined).then((res) => objectFrom(res) || {}),
+      platformIndex(),
+    ]);
+    const items = Array.isArray(data.items) ? data.items : [];
+    box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">还没有画像。</div>'; return; }
+    renderProfileTree(box, items, index);
   } catch (error) {
     box.textContent = "读取失败：" + error.message;
   }
 }
+/* ---------- 画像 ---------- */
 
 async function openProfile(uid) {
   currentUid = uid;
@@ -534,34 +828,40 @@ async function openProfile(uid) {
   }
 }
 
+function memoryLine(item) {
+  const row = document.createElement("div");
+  row.className = "mem";
+  row.style.cssText = "display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)";
+  const txt = document.createElement("div");
+  txt.style.flex = "1";
+  txt.textContent = item.content;
+  const meta = document.createElement("div");
+  meta.className = "sub";
+  meta.textContent = (item.kind || "fact") + " · " + Number(item.importance || 0).toFixed(2);
+  const del = document.createElement("button");
+  del.className = "ghost";
+  del.textContent = "删";
+  del.addEventListener("click", async () => {
+    try {
+      await call("memory/delete", { id: item.id });
+      toast("已删除");
+      openProfile(currentUid);
+      loadStatus();
+    } catch (error) { toast("删除失败：" + error.message, true); }
+  });
+  row.appendChild(txt); row.appendChild(meta); row.appendChild(del);
+  return row;
+}
+
 function renderMemories(items) {
+  // 画像里的记忆同样按 年 → 月 → 日 折起来（同一天里最新的在上）
   const box = document.getElementById("memList");
   box.textContent = "";
   if (!items.length) { box.innerHTML = '<div class="empty">还没有记忆。</div>'; return; }
-  items.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "mem";
-    row.style.cssText = "display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)";
-    const txt = document.createElement("div");
-    txt.style.flex = "1";
-    txt.textContent = item.content;
-    const meta = document.createElement("div");
-    meta.className = "sub";
-    meta.textContent = (item.kind || "fact") + " · " + Number(item.importance || 0).toFixed(2);
-    const del = document.createElement("button");
-    del.className = "ghost";
-    del.textContent = "删";
-    del.addEventListener("click", async () => {
-      try {
-        await call("memory/delete", { id: item.id });
-        toast("已删除");
-        openProfile(currentUid);
-        loadStatus();
-      } catch (error) { toast("删除失败：" + error.message, true); }
-    });
-    row.appendChild(txt); row.appendChild(meta); row.appendChild(del);
-    box.appendChild(row);
-  });
+  box.appendChild(buildDayTree(items, (item) => memoryLine(item), {
+    emptyText: "还没有记忆。",
+    withinDay: "desc",
+  }));
 }
 
 document.getElementById("btnSaveProfile").addEventListener("click", async () => {
@@ -612,6 +912,16 @@ document.getElementById("btnAddMem").addEventListener("click", async () => {
 });
 
 document.getElementById("btnRefreshMem").addEventListener("click", () => currentUid && openProfile(currentUid));
+document.getElementById("btnBackfillPlat").addEventListener("click", async () => {
+  if (!window.confirm("给所有『来源未知』的老记忆补来源平台？\n只补能确定的：整句在聊天记录里出现过，或写这条记忆前后 10 分钟只有一个平台在说话；说不准的保持未知。")) return;
+  try {
+    const res = objectFrom(await call("memory/backfill_platform", {})) || {};
+    const unsure = Number(res.ambiguous || 0) + Number(res.unknown || 0);
+    toast("回填完成：扫 " + Number(res.scanned || 0) + " 条，补上 " + Number(res.filled || 0)
+      + " 条，说不准 " + unsure + " 条");
+    if (currentUid) openProfile(currentUid);
+  } catch (error) { toast("回填失败：" + error.message, true); }
+});
 document.getElementById("btnReload").addEventListener("click", loadProfiles);
 document.getElementById("search").addEventListener("input", () => {
   clearTimeout(window._st);
@@ -661,6 +971,25 @@ async function loadPersons() {
   }
 }
 
+async function personMessageTree(pid, fallback) {
+  // 人物页：按 pid 取这个人的全部聊天（比 detail.recent 的 60 条更全），按 年/月/日 折起来
+  let items = [];
+  try {
+    const res = objectFrom(await call("messages", { pid, limit: 300 })) || {};
+    items = Array.isArray(res.items) ? res.items : [];
+  } catch (error) {
+    items = [];
+  }
+  if (!items.length) items = Array.isArray(fallback) ? fallback : [];
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "还没有共同聊天记录。";
+    return empty;
+  }
+  return buildSessionTree(items, (msg) => messageLine(msg), { emptyText: "还没有共同聊天记录。" });
+}
+
 async function openPerson(pid) {
   currentPid = pid;
   try {
@@ -697,26 +1026,7 @@ async function openPerson(pid) {
     });
     const recentBox = document.getElementById("personRecent");
     recentBox.textContent = "";
-    const messages = (data.recent || []);
-    if (!messages.length) {
-      recentBox.innerHTML = '<div class="empty">还没有共同聊天记录。</div>';
-      return;
-    }
-    messages.slice().reverse().forEach((msg) => {
-      const line = document.createElement("div");
-      line.className = "msg";
-      const who = document.createElement("div");
-      who.className = "who";
-      who.textContent = (msg.label || msg.platform || "") + (msg.role === "bot" ? " · 她" : " · " + (msg.name || msg.uid));
-      const txt = document.createElement("div");
-      txt.className = "txt";
-      txt.textContent = msg.content;
-      const time = document.createElement("div");
-      time.className = "time";
-      time.textContent = fmtTime(msg.created_at);
-      line.appendChild(who); line.appendChild(txt); line.appendChild(time);
-      recentBox.appendChild(line);
-    });
+    recentBox.appendChild(await personMessageTree(pid, data.recent || []));
   } catch (error) {
     toast("读取失败：" + error.message, true);
   }
@@ -793,9 +1103,9 @@ function relGlowColor(relation) {
 function drawStarfield(ctx, width, height, now) {
   // 深空底色：偏冷的天顶 + 更暗的地平线
   const base = ctx.createLinearGradient(0, 0, width, height);
-  base.addColorStop(0, "#070512");
-  base.addColorStop(0.45, "#0b0920");
-  base.addColorStop(1, "#04030b");
+  base.addColorStop(0, "#101a33");
+  base.addColorStop(0.45, "#0d1526");
+  base.addColorStop(1, "#070c18");
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, width, height);
 
@@ -805,16 +1115,16 @@ function drawStarfield(ctx, width, height, now) {
   ctx.rotate(-0.48);
   const band = ctx.createLinearGradient(0, -height * 0.24, 0, height * 0.24);
   band.addColorStop(0, "rgba(80,70,150,0)");
-  band.addColorStop(0.32, "rgba(110,96,180,0.10)");
-  band.addColorStop(0.5, "rgba(205,186,255,0.16)");
-  band.addColorStop(0.68, "rgba(90,130,190,0.10)");
+  band.addColorStop(0.32, "rgba(110,96,180,0.12)");
+  band.addColorStop(0.5, "rgba(190,205,255,0.18)");
+  band.addColorStop(0.68, "rgba(90,130,190,0.12)");
   band.addColorStop(1, "rgba(50,50,110,0)");
   ctx.fillStyle = band;
   ctx.fillRect(-width, -height * 0.24, width * 2, height * 0.48);
   ctx.restore();
 
   // 超低透明度星云叠层，避免出现明显圆斑
-  [[0.30, 0.30, "#7b5cff", 0.055], [0.72, 0.68, "#3a8fd0", 0.045], [0.5, 0.5, "#ff7fc0", 0.03]].forEach(([rx, ry, color, alpha]) => {
+  [[0.30, 0.30, "#7b5cff", 0.06], [0.72, 0.68, "#3a8fd0", 0.05], [0.5, 0.5, "#ff7fc0", 0.035]].forEach(([rx, ry, color, alpha]) => {
     const neb = ctx.createRadialGradient(width * rx, height * ry, 2, width * rx, height * ry, Math.max(width, height) * 0.62);
     neb.addColorStop(0, color);
     neb.addColorStop(1, "rgba(0,0,0,0)");
@@ -1035,7 +1345,8 @@ function drawGraph(ctx, graph, width, height, camera, hoverId, labelColor, now) 
   ordered.forEach((node) => {
     const active = node.id === activeId;
     const scale = Math.max(0.45, node.pscale);
-    const radius = (active ? 8.5 : node.id === "bot" ? 7 : 5) * scale;
+    // 所有节点一样大（原来 bot 节点 7、别人 5，看着"你"更大）
+    const radius = (active ? 8.5 : 6) * scale;
     const color = node.id === "bot" ? "#ff7fb5" : relGlowColor(node.relation);
     const glow = ctx.createRadialGradient(node.px, node.py, 0, node.px, node.py, radius * 3.2);
     glow.addColorStop(0, color);
@@ -1292,7 +1603,7 @@ function openRelNode(id) {
     relation.textContent = edge.relation || "朋友";
     const arrow = document.createElement("span");
     arrow.className = "edge-arrow";
-    arrow.textContent = "↔";
+    arrow.textContent = "";  // 箭头由 CSS 画（线 + 两个箭头），宽度自动撑满两侧
     center.appendChild(relation);
     center.appendChild(arrow);
     if (edge.note) {
@@ -1363,47 +1674,77 @@ document.getElementById("relAuto").addEventListener("change", (event) => {
 
 document.getElementById("btnRelReload").addEventListener("click", loadRelations);
 
+let chatPid = 0;
+let chatPersonsCache = [];
+
+async function loadChatPersons() {
+  const bar = document.getElementById("chatPersons");
+  if (!bar) return [];
+  try {
+    const data = objectFrom(await call("persons")) || {};
+    chatPersonsCache = Array.isArray(data.items) ? data.items : [];
+  } catch (error) {
+    chatPersonsCache = [];
+  }
+  bar.textContent = "";
+  if (!chatPersonsCache.length) {
+    bar.innerHTML = '<div class="empty">还没有人物记录。</div>';
+    return chatPersonsCache;
+  }
+  chatPersonsCache.forEach((person) => {
+    const btn = document.createElement("button");
+    btn.className = chatPid === Number(person.pid) ? "active" : "";
+    const plats = (person.links || []).map((link) => link.label || link.platform).filter(Boolean).join("/");
+    btn.textContent = (person.name || "未命名") + " · " + (person.msg_count || 0) + " 条" + (plats ? " · " + plats : "");
+    btn.title = "pid " + person.pid + "（点一下只看这个人，再点一下取消）";
+    btn.addEventListener("click", () => {
+      chatPid = chatPid === Number(person.pid) ? 0 : Number(person.pid);
+      if (chatPid) document.getElementById("chatUmo").value = "";
+      loadChat();
+    });
+    bar.appendChild(btn);
+  });
+  return chatPersonsCache;
+}
+
 async function loadChat() {
   const box = document.getElementById("chatList");
   box.textContent = "读取中…";
+  await loadChatPersons();
+  const who = document.getElementById("chatWho");
+  if (who) {
+    who.textContent = chatPid
+      ? "当前只看 pid " + chatPid + " 这个人（再点一次那个人取消）"
+      : "未选人：显示全部聊天；也可以在上面按会话筛选";
+  }
   try {
     const umo = (document.getElementById("chatUmo").value || "").trim();
-    const data = objectFrom(await call("messages", { umo, limit: 300 })) || {};
-    const items = Array.isArray(data.items) ? data.items : [];
+    const payload = chatPid
+      ? { pid: chatPid, limit: 300 }
+      : { umo, limit: 300, kind: umo ? "" : "private" };
+    const data = objectFrom(await call("messages", payload)) || {};
+    let items = Array.isArray(data.items) ? data.items : [];
+    // 没指定会话时，聊天页只显示私聊；群聊统一去「群聊」页
+    if (!umo) items = items.filter((it) => !String((it && it.umo) || "").includes(":GroupMessage:"));
     box.textContent = "";
     if (!items.length) { box.innerHTML = '<div class="empty">还没有聊天记录。</div>'; return; }
-    items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "msg";
-      const who = document.createElement("div");
-      who.className = "who";
-      const speaker = item.role === "bot" ? "她" : (item.name || "他");
-      who.textContent = speaker + (item.platform ? " · " + item.platform : "");
-      const txt = document.createElement("div");
-      txt.className = "txt";
-      txt.textContent = (item.role === "summary" ? "【摘要】" : "") + (item.content || "");
-      const time = document.createElement("div");
-      time.className = "time";
-      time.textContent = fmtTime(item.created_at);
-      const del = document.createElement("button");
-      del.className = "ghost";
-      del.textContent = "删";
-      del.addEventListener("click", async () => {
-        try {
-          await call("message/delete", { id: item.id });
-          loadChat();
-        } catch (error) { toast("删除失败：" + error.message, true); }
-      });
-      row.appendChild(who); row.appendChild(txt); row.appendChild(time); row.appendChild(del);
-      box.appendChild(row);
-    });
+    box.appendChild(buildSessionTree(items, (item) => messageLine(item, async (one) => {
+      try {
+        await call("message/delete", { id: one.id });
+        loadChat();
+      } catch (error) { toast("删除失败：" + error.message, true); }
+    }), { emptyText: "还没有聊天记录。" }));
   } catch (error) {
     box.textContent = "读取失败：" + error.message;
   }
 }
 
-document.getElementById("btnChatReload").addEventListener("click", loadChat);
+document.getElementById("btnChatReload").addEventListener("click", () => { chatPid = 0; loadChat(); });
 document.getElementById("btnChatClear").addEventListener("click", async () => {
+  if (chatPid) {
+    toast("选人视图下不整块清空：先在上面按会话筛选，再点清空", true);
+    return;
+  }
   const umo = (document.getElementById("chatUmo").value || "").trim();
   if (!window.confirm("清空" + (umo ? "这个会话" : "全部") + "聊天记录？不可恢复。")) return;
   try {
@@ -1412,6 +1753,120 @@ document.getElementById("btnChatClear").addEventListener("click", async () => {
     loadChat();
     loadStatus();
   } catch (error) { toast("清空失败：" + error.message, true); }
+});
+
+/* ---------- 群聊（群名 → 年 → 月 → 日） ---------- */
+function groupLabel(list) {
+  const items = Array.isArray(list) ? list : [list || {}];
+  const item = items[0] || {};
+  const umo = String(item.umo || "");
+  const plat = String(item.label || item.platform || "");
+  const matched = umo.match(/:GroupMessage:([^:]+)$/);
+  // 群名可能只在某几条消息上有（她自己的回复就没有），扫一遍取第一个非空的
+  const named = items.find((one) => String((one && one.group_name) || "").trim());
+  // 手动起的名字 > 平台给的群名 > 群号
+  const manual = String(((window._groupNames || {})[umo]) || "").trim();
+  const name = manual || String((named && named.group_name) || "").trim()
+    || (matched ? "群号 " + matched[1] : "未知群");
+  return (plat ? plat + " · " : "") + name;
+}
+
+async function fetchGroupMessages(force) {
+  // 群消息一次拉全（服务端已按群过滤），搜索在本地过滤，不再每敲一个字就请求一遍
+  if (!force && Array.isArray(window._groupMsgs)) return window._groupMsgs;
+  const data = objectFrom(await call("messages", { kind: "group", limit: 800 })) || {};
+  window._groupMsgs = Array.isArray(data.items) ? data.items : [];
+  return window._groupMsgs;
+}
+
+function renderGroupOptions(items) {
+  const select = document.getElementById("groupPick");
+  if (!select) return;
+  const keep = select.value;
+  const map = new Map();
+  items.forEach((it) => {
+    const key = String((it && it.umo) || "");
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(it);
+  });
+  select.textContent = "";
+  const head = document.createElement("option");
+  head.value = "";
+  head.textContent = map.size ? "全部群（" + map.size + "）" : "全部群";
+  select.appendChild(head);
+  Array.from(map.entries())
+    .sort((a, b) => b[1].length - a[1].length)
+    .forEach(([umo, list]) => {
+      const opt = document.createElement("option");
+      opt.value = umo;
+      opt.textContent = groupLabel(list) + " · " + list.length + " 条";
+      select.appendChild(opt);
+    });
+  const stillThere = Array.from(select.options).some((one) => one.value === keep);
+  if (keep && stillThere) select.value = keep;
+}
+
+async function loadGroups(force) {
+  const box = document.getElementById("groupList");
+  box.textContent = "读取中…";
+  try {
+    const keyword = (document.getElementById("groupSearch").value || "").trim().toLowerCase();
+    try {
+      const meta = objectFrom(await call("groups")) || {};
+      window._groupNames = meta.names || {};
+    } catch (error) {
+      window._groupNames = window._groupNames || {};
+    }
+    const all = (await fetchGroupMessages(force === true))
+      .filter((it) => String((it && it.umo) || "").includes(":GroupMessage:"));
+    renderGroupOptions(all);
+    const picked = (document.getElementById("groupPick").value || "").trim();
+    let items = picked ? all.filter((it) => String((it && it.umo) || "") === picked) : all;
+    if (keyword) {
+      items = items.filter((it) =>
+        String((it && it.umo) || "").toLowerCase().includes(keyword)
+        || String((it && it.content) || "").toLowerCase().includes(keyword));
+    }
+    box.textContent = "";
+    if (!items.length) {
+      box.innerHTML = '<div class="empty">还没有群聊消息。群里的消息会自动收到这里（按群名 → 年 → 月 → 日）。</div>';
+      return;
+    }
+    box.appendChild(buildSessionTree(items, (item) => messageLine(item, async (one) => {
+      try {
+        await call("message/delete", { id: one.id });
+        loadGroups();
+      } catch (error) { toast("删除失败：" + error.message, true); }
+    }), { emptyText: "还没有群聊消息。", sessionLabel: groupLabel }));
+  } catch (error) {
+    box.textContent = "读取失败：" + error.message;
+  }
+}
+document.getElementById("btnGroupReload").addEventListener("click", () => loadGroups(true));
+document.getElementById("groupPick").addEventListener("change", () => {
+  const pick = document.getElementById("groupPick");
+  const box = document.getElementById("groupRename");
+  if (pick && box) box.value = String(((window._groupNames || {})[pick.value]) || "");
+  loadGroups(false);
+});
+document.getElementById("btnGroupRename").addEventListener("click", async () => {
+  const pick = document.getElementById("groupPick");
+  const umo = pick ? pick.value : "";
+  const name = (document.getElementById("groupRename").value || "").trim();
+  if (!umo) { toast("先在左边选一个群", true); return; }
+  if (!name) { toast("名字不能为空", true); return; }
+  try {
+    await call("group/rename", { umo, name });
+    window._groupNames = window._groupNames || {};
+    window._groupNames[umo] = name;
+    toast("已保存群名");
+    loadGroups(false);
+  } catch (error) { toast("保存失败：" + error.message, true); }
+});
+document.getElementById("groupSearch").addEventListener("input", () => {
+  clearTimeout(window._gt);
+  window._gt = setTimeout(loadGroups, 250);
 });
 
 /* ---------- 日程 ---------- */

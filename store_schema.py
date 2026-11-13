@@ -64,6 +64,7 @@ class SchemaMixin(_StoreBase):
                     scope TEXT NOT NULL DEFAULT 'private',
                     group_id TEXT DEFAULT '',
                     kind TEXT DEFAULT 'fact',
+                    subject TEXT DEFAULT 'user',
                     content TEXT NOT NULL,
                     importance REAL DEFAULT 0.5,
                     hit_count INTEGER DEFAULT 0,
@@ -251,6 +252,7 @@ class SchemaMixin(_StoreBase):
                 return
             for column, ddl in (
                 ("platform", "ALTER TABLE messages ADD COLUMN platform TEXT DEFAULT ''"),
+                ("group_name", "ALTER TABLE messages ADD COLUMN group_name TEXT DEFAULT ''"),
                 ("pid", "ALTER TABLE messages ADD COLUMN pid INTEGER DEFAULT 0"),
                 ("message_id", "ALTER TABLE messages ADD COLUMN message_id TEXT DEFAULT ''"),
             ):
@@ -275,6 +277,10 @@ class SchemaMixin(_StoreBase):
                 ("merged_count", "ALTER TABLE memories ADD COLUMN merged_count INTEGER DEFAULT 1"),
                 ("status", "ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'"),
                 ("superseded_by", "ALTER TABLE memories ADD COLUMN superseded_by INTEGER DEFAULT 0"),
+                ("subject", "ALTER TABLE memories ADD COLUMN subject TEXT DEFAULT 'user'"),
+                # 记忆主键从 uid 升级到 pid：uid 只是兼容列，pid 才是"这个人"
+                ("pid", "ALTER TABLE memories ADD COLUMN pid INTEGER DEFAULT 0"),
+                ("platform", "ALTER TABLE memories ADD COLUMN platform TEXT DEFAULT ''"),
             ):
                 if column in mcols:
                     continue
@@ -282,6 +288,64 @@ class SchemaMixin(_StoreBase):
                     conn.execute(ddl)
                 except Exception:
                     pass
+            # 历史数据回填：先补消息的 pid（含她自己的发言行，umo 尾部就是对方 uid），
+            # 再按 uid 把记忆挂到人物上；两处都只动 pid 仍为 0 的行，可重复执行。
+            try:
+                conn.execute(
+                    "UPDATE messages SET pid = COALESCE((SELECT l.pid FROM person_links l "
+                    "WHERE l.bot_id = messages.bot_id "
+                    "AND l.uid = substr(messages.umo, instr(messages.umo, ':FriendMessage:') + 15) "
+                    "LIMIT 1), 0) "
+                    "WHERE COALESCE(pid,0)=0 AND instr(umo, ':FriendMessage:') > 0 "
+                    "AND substr(messages.umo, instr(messages.umo, ':FriendMessage:') + 15) <> ''"
+                )
+                conn.execute(
+                    "UPDATE memories SET pid = COALESCE((SELECT l.pid FROM person_links l "
+                    "WHERE l.bot_id = memories.bot_id AND l.uid = memories.uid LIMIT 1), 0) "
+                    "WHERE COALESCE(pid,0)=0"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_mem_pid ON memories(bot_id, pid, scope, group_id)"
+                )
+            except Exception:
+                pass
+            # 自愈：补回丢失的人物；把没有身份记录的记忆归到唯一的人物下
+            try:
+                self.repair_persons()
+            except Exception as exc:
+                logger.warning("[amo_data] 人物表自愈失败: %s" % exc)
+            try:
+                self.adopt_orphan_memories()
+            except Exception as exc:
+                logger.warning("[amo_data] 孤儿记忆归位失败: %s" % exc)
+            try:
+                self.merge_ghost_persons()
+            except Exception as exc:
+                logger.warning("[amo_data] 幽灵人物合并失败: %s" % exc)
+            # 一次性：给老记忆补来源平台（只补能确定的；结果记在 store_meta，不重复跑）
+            try:
+                done = conn.execute(
+                    "SELECT value FROM store_meta WHERE key='platform_backfill_v1'"
+                ).fetchone()
+                if not done:
+                    filled = self.backfill_memory_platform(apply=True)
+                    conn.execute(
+                        "INSERT INTO store_meta(key, value) VALUES('platform_backfill_v1', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (str(filled),),
+                    )
+                    conn.commit()
+                    logger.info("[amo_data] 来源回填（一次性）: %s" % filled)
+            except Exception as exc:
+                logger.warning("[amo_data] 来源回填失败: %s" % exc)
+            # 旧版把 bot 自己发的照片/语音写在用户 uid 下，subject 补成 bot。
+            try:
+                conn.execute(
+                    "UPDATE memories SET subject='bot' WHERE subject='user' "
+                    "AND (content LIKE '[我发的照片]%' OR content LIKE '[我发的语音]%')"
+                )
+            except Exception:
+                pass
             # 去重索引也要跟着 scope 走：老库是 (bot_id, uid, idem_key)，同一句话在群里
             # 和私聊各说一次就会撞 UNIQUE（私聊那条写不进去，或反过来），而代码里
             # 的去重查询已经按 (scope, group_id) 分流了，索引必须一致。

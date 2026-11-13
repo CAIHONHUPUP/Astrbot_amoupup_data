@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # 只给类型检查看：包内相对导入
         _name_key,
         _now,
         _unique_labels,
+        logger,
         platform_label,
     )
 else:  # 运行时：包模式优先，按文件直接加载时退回绝对导入
@@ -27,6 +28,7 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
             _name_key,
             _now,
             _unique_labels,
+            logger,
             platform_label,
         )
     except ImportError:  # 直接按文件加载时
@@ -36,6 +38,7 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
             _name_key,
             _now,
             _unique_labels,
+            logger,
             platform_label,
         )
 
@@ -138,9 +141,11 @@ class PeopleMixin(_StoreBase):
         bot_id, uid = str(bot_id), str(uid)
         counts: Dict[str, int] = {}
         with self.lock:
+            pid = self.pid_for_uid(bot_id, uid)
             for table, sql, params in (
                 ("profiles", "DELETE FROM profiles WHERE bot_id=? AND uid=?", (bot_id, uid)),
-                ("memories", "DELETE FROM memories WHERE bot_id=? AND uid=?", (bot_id, uid)),
+                ("memories", "DELETE FROM memories WHERE bot_id=? AND (uid=? OR pid=?)",
+                 (bot_id, uid, int(pid))),
                 ("relations", "DELETE FROM relations WHERE bot_id=? AND (a_uid=? OR b_uid=?)",
                  (bot_id, uid, uid)),
             ):
@@ -422,8 +427,8 @@ class PeopleMixin(_StoreBase):
                 if profile.get("exists"):
                     profiles.append(profile)
             rows = self.conn.execute(
-                "SELECT platform, uid, name, role, content, created_at, compressed FROM messages "
-                "WHERE bot_id=? AND pid=? ORDER BY created_at DESC LIMIT 60",
+                "SELECT platform, uid, name, role, content, created_at, compressed, group_name "
+                "FROM messages WHERE bot_id=? AND pid=? ORDER BY created_at DESC LIMIT 60",
                 (bot, int(pid)),
             ).fetchall()
             recent = []
@@ -472,6 +477,8 @@ class PeopleMixin(_StoreBase):
                      str(alias_uid), _now()),
                 )
                 self.conn.commit()
+            # 别名变了，缓存的"主 uid"立刻作废，否则运行期新加的绑定要等重启才生效
+            self.clear_canonical_cache()
             return True
         except Exception:
             return False
@@ -486,6 +493,210 @@ class PeopleMixin(_StoreBase):
             return [dict(row) for row in rows]
         except Exception:
             return []
+    def merge_ghost_persons(self) -> int:
+        """把「只有摘要、没有档案也没有记忆」的幽灵人物并进唯一有档案的那个人。
+
+        来历：历史迁移把摘要挂到了一个没有档案的 pid 上（换绑时人物被删、链接留下），
+        面板里就多出一个只有 10 条摘要的空人。
+        条件收得很窄：全库只有一个带 profile 的人；候选没有 profile、没有记忆、
+        也不含任何非摘要消息。并错了可以在面板对那条身份「解绑」还原。
+        """
+        merged = 0
+        with self.lock:
+            try:
+                profiled = set()
+                for row in self.conn.execute(
+                    "SELECT DISTINCT bot_id, uid FROM profiles"
+                ).fetchall():
+                    profiled.add((str(row["bot_id"]), str(row["uid"])))
+                if not profiled:
+                    return 0
+                links = self.conn.execute(
+                    "SELECT bot_id, platform, uid, pid FROM person_links WHERE pid>0"
+                ).fetchall()
+                keep_by_bot = {}
+                for row in links:
+                    if (str(row["bot_id"]), str(row["uid"])) in profiled:
+                        keep_by_bot[str(row["bot_id"])] = int(row["pid"])
+                if not keep_by_bot:
+                    return 0
+                persons = self.conn.execute(
+                    "SELECT pid, bot_id, name FROM persons ORDER BY pid"
+                ).fetchall()
+            except Exception:
+                return 0
+            for bot_id, keep_pid in keep_by_bot.items():
+                for person in persons:
+                    pid = int(person["pid"])
+                    if str(person["bot_id"]) != bot_id or pid == keep_pid:
+                        continue
+                    has_mem = self.conn.execute(
+                        "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND pid=?",
+                        (bot_id, pid),
+                    ).fetchone()
+                    if has_mem and int(has_mem["n"] or 0) > 0:
+                        continue
+                    other = self.conn.execute(
+                        "SELECT COUNT(*) AS n FROM messages WHERE bot_id=? AND pid=? "
+                        "AND COALESCE(role,'user') NOT IN ('summary', 'system')",
+                        (bot_id, pid),
+                    ).fetchone()
+                    if other and int(other["n"] or 0) > 0:
+                        continue
+                    if self.merge_persons(bot_id, keep_pid, pid):
+                        merged += 1
+                        logger.warning(
+                            "[amo_data] 幽灵人物已并入 pid=%s：pid=%s name=%s",
+                            keep_pid, pid, str(person["name"] or ""),
+                        )
+        return merged
+
+    def repair_persons(self) -> int:
+        """人物表自愈：身份指向一个已经不存在的人物时，把人物补回来。
+
+        以前换绑/清理逻辑会删掉 persons 行却把 person_links 留着，
+        表现就是「人物点开是空的」「消息挂在幽灵 pid 上」。
+        """
+        fixed = 0
+        with self.lock:
+            try:
+                rows = self.conn.execute(
+                    "SELECT l.pid, l.bot_id, l.name, l.created_at FROM person_links l "
+                    "LEFT JOIN persons p ON p.pid = l.pid WHERE p.pid IS NULL AND l.pid > 0"
+                ).fetchall()
+            except Exception:
+                return 0
+            for row in rows:
+                try:
+                    self.conn.execute(
+                        "INSERT INTO persons(pid, bot_id, name, created_at, updated_at) "
+                        "VALUES(?,?,?,?,?)",
+                        (int(row["pid"]), str(row["bot_id"]), str(row["name"] or ""),
+                         int(row["created_at"] or _now()), _now()),
+                    )
+                    fixed += 1
+                except Exception:
+                    continue
+            if fixed:
+                self.conn.commit()
+                logger.warning("[amo_data] 人物表自愈：补回 %d 个丢失的人物" % fixed)
+        self.clear_canonical_cache()
+        return fixed
+
+    def adopt_orphan_memories(self) -> int:
+        """没有身份记录的记忆（pid=0 且 uid 不在 person_links 里）。
+
+        库里只有一个人时不猜也错不了：整库归给他，uid 归一成主 uid。
+        多个人时不动（宁可不并，也不错并），只打一条日志等人来绑。
+        """
+        adopted = 0
+        with self.lock:
+            try:
+                uids = [str(r["uid"]) for r in self.conn.execute(
+                    "SELECT DISTINCT uid FROM memories WHERE COALESCE(pid,0)=0 "
+                    "AND uid NOT IN ('', 'bot')"
+                ).fetchall()]
+            except Exception:
+                return 0
+            if not uids:
+                return 0
+            linked = {(str(r["bot_id"]), str(r["uid"])) for r in self.conn.execute(
+                "SELECT bot_id, uid FROM person_links"
+            ).fetchall()}
+            # 机器人自己的 uid（identity_alias 里 self 指向的那个）
+            self_uids = set()
+            try:
+                for row in self.conn.execute(
+                    "SELECT alias_uid FROM identity_alias WHERE uid='self' AND alias_uid!=''"
+                ).fetchall():
+                    self_uids.add(str(row["alias_uid"]))
+            except Exception:
+                self_uids = set()
+            persons = self.conn.execute("SELECT pid, bot_id FROM persons ORDER BY pid").fetchall()
+            for uid in uids:
+                if any(u == uid for (_b, u) in linked):
+                    continue
+                rows = self.conn.execute(
+                    "SELECT id, bot_id, scope, group_id, idem_key FROM memories "
+                    "WHERE COALESCE(pid,0)=0 AND uid=?", (uid,)
+                ).fetchall()
+                for mem in rows:
+                    bot_id = str(mem["bot_id"])
+                    same_bot = [p for p in persons if str(p["bot_id"]) == bot_id]
+                    pid = 0
+                    if uid in self_uids:
+                        # 这个 uid 是机器人自己：当年按 self 记账的记忆其实是「关于主人」的，
+                        # 归给消息最多的那个人（主人），不按"只有一个人物"去猜
+                        owner = self.conn.execute(
+                            "SELECT pid, COUNT(*) AS n FROM messages WHERE bot_id=? AND pid>0 "
+                            "GROUP BY pid ORDER BY n DESC LIMIT 1",
+                            (bot_id,),
+                        ).fetchone()
+                        pid = int(owner["pid"] or 0) if owner else 0
+                    elif len(same_bot) == 1:
+                        pid = int(same_bot[0]["pid"])
+                    if not pid:
+                        logger.warning(
+                            "[amo_data] 孤儿记忆未处理：uid=%s 有 %d 个人物，等手工绑定",
+                            uid, len(same_bot),
+                        )
+                        continue
+                    links = [dict(i) for i in self.conn.execute(
+                        "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
+                        (bot_id, pid)).fetchall()]
+                    canonical = self._canonical_link(links, uid) or uid
+                    try:
+                        self.conn.execute(
+                            "UPDATE memories SET uid=?, pid=? WHERE id=?",
+                            (canonical, pid, int(mem["id"])),
+                        )
+                        adopted += 1
+                    except sqlite3.IntegrityError:
+                        old = self.conn.execute(
+                            "SELECT id FROM memories WHERE bot_id=? AND uid=? AND scope=? "
+                            "AND group_id=? AND idem_key=? LIMIT 1",
+                            (bot_id, canonical, str(mem["scope"]), str(mem["group_id"]),
+                             str(mem["idem_key"])),
+                        ).fetchone()
+                        self.conn.execute(
+                            "UPDATE memories SET status='merged', superseded_by=? WHERE id=?",
+                            (int(old["id"]) if old else 0, int(mem["id"])),
+                        )
+            if adopted:
+                self.conn.commit()
+                logger.info("[amo_data] 孤儿记忆归位 %d 条" % adopted)
+        return adopted
+
+    def pid_for_uid(self, bot_id: str, uid: str) -> int:
+        """只有 uid 时反查 pid（不分平台）；查不到返回 0。"""
+        uid = str(uid or "")
+        if not uid:
+            return 0
+        try:
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT pid FROM person_links WHERE bot_id=? AND uid=? AND pid>0 LIMIT 1",
+                    (str(bot_id), uid),
+                ).fetchone()
+        except Exception:
+            return 0
+        return int(row["pid"] or 0) if row else 0
+
+    def person_pid(self, bot_id: str, platform: str, uid: str) -> int:
+        """(平台, uid) → pid；先过别名表。只查不建，查不到返回 0。"""
+        platform, uid = self._alias_of(str(bot_id), str(platform or ""), str(uid))
+        if not uid:
+            return 0
+        try:
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT pid FROM person_links WHERE bot_id=? AND platform=? AND uid=?",
+                    (str(bot_id), platform, uid),
+                ).fetchone()
+        except Exception:
+            return 0
+        return int(row["pid"] or 0) if row else 0
+
     def _canonical_link(self, links, fallback: str = "") -> str:
         """同一个人选一个主身份：优先飞书 open_id，其次第一条。"""
         for item in links or []:
@@ -650,16 +861,16 @@ class PeopleMixin(_StoreBase):
                     continue
                 seen_platforms.add(platform)
                 rows = self.conn.execute(
-                    "SELECT platform, uid, name, role, content, created_at, compressed FROM messages "
-                    "WHERE bot_id=? AND pid=? AND platform=? AND role!='bot' "
+                    "SELECT platform, uid, name, role, content, created_at, compressed, group_name "
+                    "FROM messages WHERE bot_id=? AND pid=? AND platform=? AND role!='bot' "
                     "ORDER BY created_at DESC LIMIT ?",
                     (str(bot_id), int(detail["pid"]), platform, per_platform),
                 ).fetchall()
                 for row in rows:
                     gathered[(row["platform"], row["role"], row["created_at"], row["content"])] = row
             bot_rows = self.conn.execute(
-                "SELECT platform, uid, name, role, content, created_at, compressed FROM messages "
-                "WHERE bot_id=? AND pid=? AND role='bot' "
+                "SELECT platform, uid, name, role, content, created_at, compressed, group_name "
+                "FROM messages WHERE bot_id=? AND pid=? AND role='bot' "
                 "ORDER BY created_at DESC LIMIT ?",
                 (str(bot_id), int(detail["pid"]), per_platform),
             ).fetchall()
@@ -674,6 +885,7 @@ class PeopleMixin(_StoreBase):
                     "name": str(row["name"] or ""),
                     "role": str(row["role"] or "user"),
                     "content": str(row["content"] or ""),
+                    "group_name": str(row["group_name"] or ""),
                     "created_at": int(row["created_at"] or 0),
                     "compressed": int(row["compressed"] or 0),
                 }
@@ -681,21 +893,28 @@ class PeopleMixin(_StoreBase):
             ]
         memories: List[Dict[str, Any]] = []
         try:
-            # 记忆按**主 uid** 存的（飞书 open_id 会被 amo 归一成 QQ uid），
-            # 只按当前平台 uid 查，在飞书那头永远是空。把这个人所有身份都查一遍。
-            uid_candidates = [str(uid)] + [str(item.get("uid") or "") for item in detail.get("links", [])]
+            # 优先按 pid 取（同一人的所有平台记忆都在这个 pid 下）；
+            # 老记忆 pid=0，再按各个身份的 uid 兜一遍。
+            pid_value = int(detail.get("pid") or 0)
             seen_mem = set()
-            seen_uids = set()
-            for one_uid in uid_candidates:
-                if not one_uid or one_uid in seen_uids:
-                    continue
-                seen_uids.add(one_uid)
-                for row in self.list_memories(str(bot_id), uid=one_uid, limit=limit) or []:
+
+            def _take(rows):
+                for row in rows or []:
                     key = (str(row.get("content") or "")[:80], row.get("created_at"))
                     if key in seen_mem:
                         continue
                     seen_mem.add(key)
                     memories.append(row)
+
+            if pid_value:
+                _take(self.list_memories(str(bot_id), limit=limit, pid=pid_value))
+            uid_candidates = [str(uid)] + [str(item.get("uid") or "") for item in detail.get("links", [])]
+            seen_uids = set()
+            for one_uid in uid_candidates:
+                if not one_uid or one_uid in seen_uids:
+                    continue
+                seen_uids.add(one_uid)
+                _take(self.list_memories(str(bot_id), uid=one_uid, limit=limit))
             memories = memories[: limit]
         except Exception:
             memories = []

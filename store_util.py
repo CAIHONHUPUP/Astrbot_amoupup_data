@@ -196,6 +196,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "summary_merge_max_chars": 800,    # 同天摘要合并上限；超过就拆条，别造 4000 字怪物
     "meta_query_fallback": True,       # 「你还记得我吗」这类没有实词的查询按重要度兜底
     "meta_query_limit": 3,             # 兜底最多给几条
+    "identity_debug": True,            # [IDENTITY_DEBUG]/[MEMORY_DEBUG] 日志开关
 }
 
 

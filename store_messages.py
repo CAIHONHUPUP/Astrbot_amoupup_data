@@ -9,6 +9,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+import json
 import re
 import sqlite3
 
@@ -55,7 +56,8 @@ class MessagesMixin(_StoreBase):
 
     def add_message(self, bot_id: str, umo: str, uid: str = "", name: str = "",
                     role: str = "user", content: str = "", platform: str = "",
-                    created_at: int = 0, message_id: str = "") -> int:
+                    created_at: int = 0, message_id: str = "",
+                    group_name: str = "") -> int:
         text = _clean(content, 4000)
         if not text:
             return 0
@@ -91,6 +93,13 @@ class MessagesMixin(_StoreBase):
                     (str(bot_id), mid),
                 ).fetchone()
                 if dup:
+                    # 重放/重连时这条已经在了：只补一下当时没拿到的群名，不重复插入
+                    if group_name:
+                        self.conn.execute(
+                            "UPDATE messages SET group_name=? WHERE id=? AND COALESCE(group_name,'')=''",
+                            (_clean(group_name, 64), int(dup["id"])),
+                        )
+                        self.conn.commit()
                     return int(dup["id"] or 0)
             # 没有 message_id 时退回旧逻辑：10 秒内完全相同的只留一条
             if not mid:
@@ -102,10 +111,10 @@ class MessagesMixin(_StoreBase):
                 if dup:
                     return int(dup["id"] or 0)
             cur = self.conn.execute(
-                "INSERT INTO messages(bot_id, umo, uid, name, role, content, created_at, platform, pid, message_id) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO messages(bot_id, umo, uid, name, role, content, created_at, platform, pid, "
+                "message_id, group_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (str(bot_id), str(umo), str(uid), _clean(name, 64),
-                 role_n, text, ts, platform, pid, mid),
+                 role_n, text, ts, platform, pid, mid, _clean(group_name, 64)),
             )
             self.conn.commit()
             return int(cur.lastrowid or 0)
@@ -127,7 +136,7 @@ class MessagesMixin(_StoreBase):
         except Exception:
             pass
         where, params = self._msg_filters(bot_id, umo, uid)
-        sql = ("SELECT id, umo, uid, name, role, content, created_at, platform, pid "
+        sql = ("SELECT id, umo, uid, name, role, content, created_at, platform, pid, group_name "
                "FROM messages" + where)
         if since_ts:
             sql += " AND created_at>?"
@@ -141,7 +150,7 @@ class MessagesMixin(_StoreBase):
                          uid: str = "", limit: int = 2000) -> List[Dict[str, Any]]:
         """取某个时间段内的聊天（给日记用：按天汇总，跨平台）。"""
         where, params = _bot_filter(bot_id)
-        sql = ("SELECT id, umo, uid, name, role, content, created_at, platform, pid "
+        sql = ("SELECT id, umo, uid, name, role, content, created_at, platform, pid, group_name "
                "FROM messages WHERE 1=1" + where +
                " AND created_at>=? AND created_at<?")
         params.extend([int(start_ts), int(end_ts)])
@@ -338,33 +347,69 @@ class MessagesMixin(_StoreBase):
         rows = [r for r in rows if start <= int(r.get("created_at") or 0) < end]
         rows = sorted(rows, key=lambda r: (int(r.get("created_at") or 0), int(r.get("id") or 0)))
         return rows[-limit:]
+    def group_sessions(self, bot_id: str, limit: int = 500) -> List[Dict[str, Any]]:
+        """群会话列表（群号 / 消息里的群名 / 条数 / 最后时间），给面板「群聊」页用。"""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT umo, MAX(group_name) AS group_name, COUNT(*) AS n, "
+                "MAX(created_at) AS last_at FROM messages "
+                "WHERE bot_id=? AND umo LIKE '%:GroupMessage:%' "
+                "GROUP BY umo ORDER BY last_at DESC LIMIT ?",
+                (str(bot_id), max(1, min(int(limit), 500))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def rename_group(self, bot_id: str, umo: str, name: str) -> bool:
+        """给群手动起名（平台永远不给群名时用），存在 cache 里不过期。"""
+        umo, name = str(umo or "").strip(), _clean(name, 64)
+        if not umo or not name:
+            return False
+        return bool(self.cache_set(bot_id, "group_name:" + umo, name, 0))
+
+    def group_name_overrides(self, bot_id: str) -> Dict[str, str]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT key, value FROM cache WHERE bot_id=? AND key LIKE 'group_name:%'",
+                (str(bot_id),),
+            ).fetchall()
+        out = {}
+        for row in rows:
+            raw = str(row["value"] or "")
+            try:
+                value = json.loads(raw)
+            except Exception:
+                value = raw
+            out[str(row["key"])[len("group_name:"):]] = str(value or "")
+        return out
+
     def list_messages(self, bot_id: str, umo: str = "", limit: int = 200,
-                      pid: int = 0, platform: str = "", uid: str = "") -> List[Dict[str, Any]]:
+                      pid: int = 0, platform: str = "", uid: str = "",
+                      kind: str = "") -> List[Dict[str, Any]]:
         """聊天 + 摘要混排，按真实聊天时间倒序（时间回看/召回的候选池用）。"""
-        return self._list_rows(bot_id, umo, limit, pid, platform, uid, role=None)
+        return self._list_rows(bot_id, umo, limit, pid, platform, uid, role=None, kind=kind)
 
     def list_messages_grouped(self, bot_id: str, umo: str = "", limit: int = 200,
                               pid: int = 0, platform: str = "", uid: str = "",
-                              summary_limit: int = 100) -> List[Dict[str, Any]]:
+                              summary_limit: int = 100, kind: str = "") -> List[Dict[str, Any]]:
         """面板「聊天」页用：聊天按时间倒序在前，摘要按时间倒序统一放最后。
 
         以前摘要和聊天混在一个 LIMIT 里按 created_at 排，摘要都是几天前的，
         最近 200/300 条全是聊天 → 摘要被挤出窗口，面板上几乎看不到摘要。
         现在分两次查：聊天取 limit 条，摘要另取 summary_limit 条拼在后面。
         """
-        chats = self._list_rows(bot_id, umo, limit, pid, platform, uid, role="chat")
-        summaries = self._list_rows(bot_id, umo, summary_limit, pid, platform, uid, role="summary")
+        chats = self._list_rows(bot_id, umo, limit, pid, platform, uid, role="chat", kind=kind)
+        summaries = self._list_rows(bot_id, umo, summary_limit, pid, platform, uid, role="summary", kind=kind)
         return chats + summaries
 
     def _list_rows(self, bot_id: str, umo: str, limit: int, pid: int, platform: str,
-                   uid: str, role: str | None) -> List[Dict[str, Any]]:
+                   uid: str, role: str | None, kind: str = "") -> List[Dict[str, Any]]:
         try:
             uid = self.canonical_uid_for_uid(bot_id, uid) or uid
         except Exception:
             pass
         where, params = _bot_filter(bot_id)
         sql = ("SELECT id, umo, uid, name, role, content, created_at, compressed, "
-               "platform, pid FROM messages WHERE 1=1" + where)
+               "platform, pid, group_name FROM messages WHERE 1=1" + where)
         if umo:
             sql += " AND umo=?"
             params.append(str(umo))
@@ -377,6 +422,11 @@ class MessagesMixin(_StoreBase):
         if uid:
             sql += " AND uid=?"
             params.append(str(uid))
+        if kind == "group":
+            # 群聊 / 私聊在库层面就分开，别让私聊把群消息挤出 LIMIT 窗口
+            sql += " AND umo LIKE '%:GroupMessage:%'"
+        elif kind == "private":
+            sql += " AND umo NOT LIKE '%:GroupMessage:%'"
         if role == "summary":
             sql += " AND role='summary'"
         elif role == "chat":

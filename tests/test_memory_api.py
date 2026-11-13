@@ -76,6 +76,17 @@ class MemoryTests(ApiCase):
         self.assertTrue(self.run_api(self.api.delete_memory(BOT, listed[0]["id"])))
         self.assertEqual(self.run_api(self.api.list_memories(BOT, UID, 10)), [])
 
+    def test_subject_roundtrip(self) -> None:
+        self.run_api(self.api.remember(BOT, UID, "他明天开会", subject="user"))
+        self.run_api(self.api.remember(
+            BOT, UID, "[我发的照片] 自拍", kind="bot_media", subject="bot",
+        ))
+        listed = self.run_api(self.api.list_memories(BOT, UID, 10))
+        by_content = {row["content"]: row.get("subject") for row in listed}
+        self.assertEqual(by_content.get("他明天开会"), "user")
+        self.assertEqual(by_content.get("[我发的照片] 自拍"), "bot")
+        self.assertEqual({row.get("subject") for row in listed}, {"user", "bot"})
+
     def test_recall_empty_store(self) -> None:
         self.assertEqual(self.run_api(self.api.recall(BOT, UID, "什么都可以", 5)), [])
 

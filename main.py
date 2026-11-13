@@ -83,7 +83,7 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
                 return ""
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "2.9.2"
+PLUGIN_VERSION = "3.0.0"
 DEFAULT_BOT_ID = "default"
 
 
@@ -143,19 +143,22 @@ class MemoryAPI:
 
     async def remember(self, bot_id: str, uid: str, content: str, kind: str = "fact",
                        importance: float = 0.5, scope: str = "private",
-                       group_id: str = "", idem_key: str = "") -> dict:
+                       group_id: str = "", idem_key: str = "", subject: str = "user",
+                       platform: str = "") -> dict:
         try:
             return self._store.remember(
                 self._bot(bot_id), uid, content,
                 kind=kind, importance=importance, scope=scope,
-                group_id=group_id, idem_key=idem_key,
+                group_id=group_id, idem_key=idem_key, subject=subject,
+                platform=platform,
             )
         except Exception as exc:
             logger.debug("[amo_data] 写入记忆失败: %s" % exc)
             return {"ok": False, "reason": str(exc)}
 
     async def recall(self, bot_id: str, uid: str, query: str = "", limit: int = 6,
-                     scope: str = "", group_id: str = "") -> list:
+                     scope: str = "", group_id: str = "", platform: str = "",
+                     pid: int = 0) -> list:
         try:
             # recall 里有 BM25 打分（几千条记忆时几十毫秒）和可选的 embedding 网络请求，
             # 放线程里跑，别把 AstrBot 的事件循环卡住（卡住=所有聊天都排队）
@@ -163,6 +166,7 @@ class MemoryAPI:
                 self._store.recall,
                 self._bot(bot_id), uid, query,
                 limit=limit, scope=scope, group_id=group_id,
+                platform=platform, pid=pid,
             )
         except Exception as exc:
             logger.debug("[amo_data] 召回记忆失败: %s" % exc)
@@ -224,11 +228,11 @@ class MemoryAPI:
 
     async def add_message(self, bot_id: str, umo: str, uid: str = "", name: str = "",
                            role: str = "user", content: str = "", platform: str = "",
-                           message_id: str = "") -> int:
+                           message_id: str = "", group_name: str = "") -> int:
         try:
             return self._store.add_message(
                 self._bot(bot_id), umo, uid, name, role, content,
-                platform=platform, message_id=message_id,
+                platform=platform, message_id=message_id, group_name=group_name,
             )
         except Exception as exc:
             logger.warning("[amo_data] 写聊天记录失败: %s" % exc)
@@ -624,10 +628,10 @@ class AmoDataPlugin(Star):
     WRITE_PATHS = frozenset({
         "/profile/save", "/profile/delete",
         "/person/link", "/person/unlink", "/person/merge",
-        "/memory/save", "/memory/delete", "/memory/maintain",
+        "/memory/save", "/memory/delete", "/memory/maintain", "/memory/backfill_platform",
         "/relation/save", "/relation/delete",
         "/backup/now", "/backup/import", "/backup/restore",
-        "/message/delete", "/message/clear",
+        "/message/delete", "/message/clear", "/group/rename",
         "/log/delete", "/log/clear",
         "/schedule/delete", "/maintenance",
     })
@@ -676,6 +680,7 @@ class AmoDataPlugin(Star):
             ("/memory/save", self.api_memory_save),
             ("/memory/delete", self.api_memory_delete),
             ("/memory/maintain", self.api_memory_maintain),
+            ("/memory/backfill_platform", self.api_memory_backfill_platform),
             ("/relations", self.api_relations),
             ("/relation/save", self.api_relation_save),
             ("/relation/delete", self.api_relation_delete),
@@ -685,6 +690,8 @@ class AmoDataPlugin(Star):
             ("/backup/import", self.api_backup_import),
             ("/backup/restore", self.api_backup_restore),
             ("/messages", self.api_messages),
+            ("/groups", self.api_groups),
+            ("/group/rename", self.api_group_rename),
             ("/message/delete", self.api_message_delete),
             ("/message/clear", self.api_message_clear),
             ("/logs", self.api_logs),
@@ -972,6 +979,22 @@ class AmoDataPlugin(Star):
         )
         return {"code": 0 if result.get("ok") else 1, "data": result, "msg": "已记住"}
 
+    async def api_memory_backfill_platform(self):
+        """一次性回填：给 platform 为空的老记忆补来源平台（只补能确定的）。"""
+        payload = await self._body()
+        bot_id = self._bot_id(payload, write=True)
+        apply = payload.get("apply", True)
+        if isinstance(apply, str):
+            apply = apply.strip().lower() not in ("0", "false", "no", "off")
+        payload_apply = bool(apply)
+        try:
+            result = await asyncio.to_thread(
+                self.store.backfill_memory_platform, bot_id, 600, 20000, payload_apply,
+            )
+        except Exception as exc:
+            return {"code": 1, "msg": str(exc)}
+        return {"code": 0, "data": result, "applied": payload_apply}
+
     async def api_memory_delete(self):
         payload = await self._body()
         bot_id = self._bot_id(payload)
@@ -1093,6 +1116,24 @@ class AmoDataPlugin(Star):
         ok = self.store.delete_relation(bot_id, a_uid, b_uid)
         return {"code": 0 if ok else 1, "msg": "已删除" if ok else "没有这条关系"}
 
+    async def api_groups(self):
+        payload = await self._body()
+        bot_id = self._bot_id(payload)
+        return {"code": 0, "data": {
+            "items": self.store.group_sessions(bot_id, 500),
+            "names": self.store.group_name_overrides(bot_id),
+        }}
+
+    async def api_group_rename(self):
+        payload = await self._body()
+        bot_id = self._bot_id(payload, write=True)
+        umo = str(payload.get("umo") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        if not umo:
+            return {"code": 1, "msg": "缺少 umo"}
+        ok = self.store.rename_group(bot_id, umo, name)
+        return {"code": 0 if ok else 1, "msg": "已保存群名" if ok else "名字不能为空"}
+
     async def api_messages(self):
         payload = await self._body()
         bot_id = self._bot_id(payload)
@@ -1104,6 +1145,7 @@ class AmoDataPlugin(Star):
             pid = 0
         platform = str(payload.get("platform") or "").strip()
         uid = str(payload.get("uid") or "").strip()
+        kind = str(payload.get("kind") or "").strip().lower()
         query = str(payload.get("query") or "").strip()
         if query:
             # 带时间说法（昨天下午 / 上周三 / 11月6号晚上10点）就走分层检索：
@@ -1119,7 +1161,7 @@ class AmoDataPlugin(Star):
         return {"code": 0, "data": {
             "items": self.store.list_messages_grouped(
                 bot_id, umo, limit, pid=pid, platform=platform, uid=uid,
-                summary_limit=summary_limit,
+                summary_limit=summary_limit, kind=kind,
             )
         }}
 
