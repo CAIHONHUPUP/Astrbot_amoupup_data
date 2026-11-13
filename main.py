@@ -976,6 +976,7 @@ class AmoDataPlugin(Star):
             importance=payload.get("importance", 0.6),
             scope=str(payload.get("scope") or "private"),
             group_id=str(payload.get("group_id") or ""),
+            platform=str(payload.get("platform") or ""),
         )
         return {"code": 0 if result.get("ok") else 1, "data": result, "msg": "已记住"}
 
