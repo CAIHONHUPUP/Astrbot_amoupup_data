@@ -1,58 +1,78 @@
 # -*- coding: utf-8 -*-
-"""消息 / 时间窗 / 分层总结 / 清理。"""
+"""services/message_engine.py —— 聊天记录：写入、时间窗、分层回看、分组、压缩清理。"""
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Tuple
 import json
 import re
 import sqlite3
 
-if TYPE_CHECKING:  # 只给类型检查看：包内相对导入
-    from .store_util import (
+from typing import Any, Dict, List, Optional
+
+try:  # AstrBot 包模式
+    from ..utils.time_query import describe_span as _describe_span
+    from ..utils.time_query import parse_time_span as _parse_time_span
+    from ..utils.text_process import (
+        Any,
+        Dict,
+        List,
         _bot_filter,
         _clean,
         _clock,
         _now,
         platform_label,
         platform_of_umo,
+        re,
     )
-else:  # 运行时：包模式优先，按文件直接加载时退回绝对导入
-    try:
-        from .store_util import (
-            _bot_filter,
-            _clean,
-            _clock,
-            _now,
-            platform_label,
-            platform_of_umo,
-        )
-    except ImportError:  # 直接按文件加载时
-        from store_util import (
-            _bot_filter,
-            _clean,
-            _clock,
-            _now,
-            platform_label,
-            platform_of_umo,
-        )
+except ImportError:  # 顶层导入（测试/脚本）
+    from utils.time_query import describe_span as _describe_span
+    from utils.time_query import parse_time_span as _parse_time_span
+    from utils.text_process import (
+        Any,
+        Dict,
+        List,
+        _bot_filter,
+        _clean,
+        _clock,
+        _now,
+        platform_label,
+        platform_of_umo,
+        re,
+    )
 
 
-if TYPE_CHECKING:
-    from .store_types import StoreLike as _StoreBase
-else:  # 运行时用 object：协议里的声明不能进 MRO，否则会挡掉别的 mixin 的真实实现
-    _StoreBase = object
+class MessageEngine:
+    """聊天读写与保留策略；身份归一走 PersonEngine，缓存走 CacheEngine。"""
 
+    def __init__(self, db, settings=None, persons=None):
+        self.db = db
+        self.settings = settings if settings is not None else {}
+        self.persons = persons
+        self.plugin = None
+        self._canonical_cache = {}
 
-class MessagesMixin(_StoreBase):
-    if TYPE_CHECKING:
-        canonical_uid: Any
-        canonical_uid_for_uid: Any
+    # ---- 迁移期适配：老 mixin 里直接用了 self.conn / self.lock / self.setting ----
+    @property
+    def conn(self) -> sqlite3.Connection:
+        return self.db.conn
+
+    @property
+    def lock(self):
+        return self.db.lock
+
+    def setting(self, key: str, default: Any = None) -> Any:
+        return self.settings.get(key, default)
+
+    # 中文时间词（原 DataStore 上的类属性，聊天时间窗解析要用）
+    _CN_NUM = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+               "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    _PERIODS = (
+        (("凌晨",), 0, 6),
+        (("早上", "早晨", "上午"), 6, 12),
+        (("中午",), 11, 14),
+        (("下午",), 12, 18),
+        (("傍晚", "晚上", "今晚", "昨晚", "夜里", "深夜"), 18, 24),
+    )
 
     def add_message(self, bot_id: str, umo: str, uid: str = "", name: str = "",
                     role: str = "user", content: str = "", platform: str = "",
@@ -70,8 +90,8 @@ class MessagesMixin(_StoreBase):
         pid = 0
         if role_n != "bot" and uid:
             try:
-                pid = self.resolve_person(bot_id, platform, uid, name)
-                uid = self.canonical_uid(bot_id, platform, uid) or uid
+                pid = self.plugin.persons.resolve_person(bot_id, platform, uid, name)
+                uid = self.plugin.persons.canonical_uid(bot_id, platform, uid) or uid
             except Exception:
                 pid = 0
         elif role_n == "bot":
@@ -81,7 +101,7 @@ class MessagesMixin(_StoreBase):
                 if ":FriendMessage:" in str(umo):
                     tail = str(umo).rsplit(":", 1)[-1].strip()
                     if tail and tail != "bot":
-                        pid = self.resolve_person(bot_id, platform, tail)
+                        pid = self.plugin.persons.resolve_person(bot_id, platform, tail)
             except Exception:
                 pid = 0
         mid = _clean(str(message_id or "").strip(), 128)
@@ -118,6 +138,8 @@ class MessagesMixin(_StoreBase):
             )
             self.conn.commit()
             return int(cur.lastrowid or 0)
+
+
     def messages_since(self, bot_id: str, uid: str = "", since_ts: int = 0,
                        limit: int = 200, since: Optional[int] = None,
                        umo: str = "") -> List[Dict[str, Any]]:
@@ -132,7 +154,7 @@ class MessagesMixin(_StoreBase):
         if since is not None:  # 兼容面板/里程碑旧调用（since=）
             since_ts = int(since)
         try:
-            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+            uid = self.plugin.persons.canonical_uid_for_uid(bot_id, uid) or uid
         except Exception:
             pass
         where, params = self._msg_filters(bot_id, umo, uid)
@@ -146,6 +168,8 @@ class MessagesMixin(_StoreBase):
         with self.lock:
             rows = self.conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+
     def messages_between(self, bot_id: str, start_ts: int, end_ts: int,
                          uid: str = "", limit: int = 2000) -> List[Dict[str, Any]]:
         """取某个时间段内的聊天（给日记用：按天汇总，跨平台）。"""
@@ -162,6 +186,8 @@ class MessagesMixin(_StoreBase):
         with self.lock:
             rows = self.conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+
     @classmethod
     def _cn_int(cls, text: str) -> int:
         """「6 / 六 / 十一 / 二十三」→ int；认不出返回 0。"""
@@ -174,6 +200,8 @@ class MessagesMixin(_StoreBase):
             ones = cls._CN_NUM.get(right, 0) if right else 0
             return tens * 10 + ones
         return cls._CN_NUM.get(raw, 0)
+
+
     @classmethod
     def _day_window(cls, day, text: str):
         """一天的范围；话里带「下午/晚上」就只取那一段。"""
@@ -182,6 +210,8 @@ class MessagesMixin(_StoreBase):
             if any(word in text for word in words):
                 return day + _td(hours=start_hour), day + _td(hours=end_hour)
         return day, day + _td(days=1)
+
+
     @staticmethod
     def _epoch(dt):
         """naive 本地时间 → 秒；按插件配置的时区算，不跟服务器时区跑。"""
@@ -198,6 +228,7 @@ class MessagesMixin(_StoreBase):
             return int(dt.timestamp())
         except Exception:
             return 0
+
 
     @classmethod
     def _time_window(cls, query: str) -> tuple:
@@ -302,6 +333,8 @@ class MessagesMixin(_StoreBase):
             start = today - _td(days=amount - 1)
             return cls._epoch(start), cls._epoch(today + _td(days=1))
         return 0, 0
+
+
     @classmethod
     def _time_label(cls, query: str) -> str:
         """给时间回看一个标题（amo 的 render 必须有 label，否则整段丢弃）。"""
@@ -325,6 +358,8 @@ class MessagesMixin(_StoreBase):
         if m:
             return "最近" + m.group(1) + m.group(2)
         return ""
+
+
     def recall_messages(self, bot_id: str, query: str = "", umo: str = "",
                         uid: str = "", limit: int = 200) -> List[Dict[str, Any]]:
         """按时间回看的一段聊天（时间回看 / 每日总结都调它）。
@@ -334,7 +369,7 @@ class MessagesMixin(_StoreBase):
         """
         limit = max(1, min(int(limit or 200), 1000))
         try:
-            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+            uid = self.plugin.persons.canonical_uid_for_uid(bot_id, uid) or uid
         except Exception:
             pass
         start, end = self._time_window(query)
@@ -347,6 +382,27 @@ class MessagesMixin(_StoreBase):
         rows = [r for r in rows if start <= int(r.get("created_at") or 0) < end]
         rows = sorted(rows, key=lambda r: (int(r.get("created_at") or 0), int(r.get("id") or 0)))
         return rows[-limit:]
+
+
+
+    def recall_by_time(self, bot_id: str, query: str = "", umo: str = "",
+                       uid: str = "", limit: int = 200) -> Dict[str, Any]:
+        """按时间说法取聊天记录：年 → 月日 → 小时 → 具体消息（四级漏斗）。"""
+        try:
+            span = _parse_time_span(query)
+            if not span:
+                rows = self.list_messages(bot_id, umo, limit, uid=uid)
+                return {"messages": list(reversed(rows)), "span": None, "path": {},
+                        "label": "最近 %d 条" % len(rows)}
+            rows, path = self.hierarchical_messages(
+                bot_id, span, umo=umo, uid=uid, limit=limit,
+            )
+            return {"messages": rows, "span": span, "path": path,
+                    "label": _describe_span(span)}
+        except Exception as exc:
+            logger.debug("[amo_data] 按时间取聊天记录失败: %s" % exc)
+            return {"messages": [], "span": None, "path": {}, "label": ""}
+
     def group_sessions(self, bot_id: str, limit: int = 500) -> List[Dict[str, Any]]:
         """群会话列表（群号 / 消息里的群名 / 条数 / 最后时间），给面板「群聊」页用。"""
         with self.lock:
@@ -359,12 +415,14 @@ class MessagesMixin(_StoreBase):
             ).fetchall()
         return [dict(row) for row in rows]
 
+
     def rename_group(self, bot_id: str, umo: str, name: str) -> bool:
         """给群手动起名（平台永远不给群名时用），存在 cache 里不过期。"""
         umo, name = str(umo or "").strip(), _clean(name, 64)
         if not umo or not name:
             return False
-        return bool(self.cache_set(bot_id, "group_name:" + umo, name, 0))
+        return bool(self.plugin.cache.cache_set(bot_id, "group_name:" + umo, name, 0))
+
 
     def group_name_overrides(self, bot_id: str) -> Dict[str, str]:
         with self.lock:
@@ -382,11 +440,13 @@ class MessagesMixin(_StoreBase):
             out[str(row["key"])[len("group_name:"):]] = str(value or "")
         return out
 
+
     def list_messages(self, bot_id: str, umo: str = "", limit: int = 200,
                       pid: int = 0, platform: str = "", uid: str = "",
                       kind: str = "") -> List[Dict[str, Any]]:
         """聊天 + 摘要混排，按真实聊天时间倒序（时间回看/召回的候选池用）。"""
         return self._list_rows(bot_id, umo, limit, pid, platform, uid, role=None, kind=kind)
+
 
     def list_messages_grouped(self, bot_id: str, umo: str = "", limit: int = 200,
                               pid: int = 0, platform: str = "", uid: str = "",
@@ -401,10 +461,11 @@ class MessagesMixin(_StoreBase):
         summaries = self._list_rows(bot_id, umo, summary_limit, pid, platform, uid, role="summary", kind=kind)
         return chats + summaries
 
+
     def _list_rows(self, bot_id: str, umo: str, limit: int, pid: int, platform: str,
                    uid: str, role: str | None, kind: str = "") -> List[Dict[str, Any]]:
         try:
-            uid = self.canonical_uid_for_uid(bot_id, uid) or uid
+            uid = self.plugin.persons.canonical_uid_for_uid(bot_id, uid) or uid
         except Exception:
             pass
         where, params = _bot_filter(bot_id)
@@ -443,6 +504,8 @@ class MessagesMixin(_StoreBase):
             item["label"] = platform_label(str(item.get("platform") or ""))
             out.append(item)
         return out
+
+
     @staticmethod
     def _msg_filters(bot_id: str, umo: str = "", uid: str = "", pid: int = 0) -> Tuple[str, List[Any]]:
         where, params = _bot_filter(bot_id)
@@ -457,6 +520,8 @@ class MessagesMixin(_StoreBase):
             sql += " AND pid=?"
             params.append(int(pid))
         return sql, params
+
+
     def time_buckets(self, bot_id: str, umo: str = "", uid: str = "",
                      year: str = "", month: str = "", day: str = "",
                      start: int = 0, end: int = 0) -> Dict[str, Any]:
@@ -494,6 +559,8 @@ class MessagesMixin(_StoreBase):
         with self.lock:
             rows = self.conn.execute(sql.format(fmt=fmt, tz=_clock.sql_offset_modifier()), params).fetchall()
         return {str(row["bucket"]): int(row["n"]) for row in rows}
+
+
     def messages_in_span(self, bot_id: str, start: int, end: int,
                          umo: str = "", uid: str = "", limit: int = 200) -> List[Dict[str, Any]]:
         """取时间区间内的消息（按时间正序）；正文不带时间戳。"""
@@ -508,6 +575,8 @@ class MessagesMixin(_StoreBase):
         with self.lock:
             rows = self.conn.execute(sql, params).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+
     def hierarchical_messages(self, bot_id: str, span: Dict[str, Any],
                               umo: str = "", uid: str = "",
                               limit: int = 200) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -554,6 +623,8 @@ class MessagesMixin(_StoreBase):
         rows = self.messages_in_span(bot_id, start, end, umo=umo, uid=uid, limit=limit)
         path["messages"] = len(rows)
         return rows, path
+
+
     def delete_message(self, bot_id: str, message_id: int) -> bool:
         with self.lock:
             cur = self.conn.execute(
@@ -562,6 +633,8 @@ class MessagesMixin(_StoreBase):
             )
             self.conn.commit()
             return bool(cur.rowcount)
+
+
     def clear_messages(self, bot_id: str, umo: str = "") -> int:
         sql = "DELETE FROM messages WHERE bot_id=?"
         params: List[Any] = [str(bot_id)]
@@ -572,6 +645,8 @@ class MessagesMixin(_StoreBase):
             cur = self.conn.execute(sql, params)
             self.conn.commit()
             return max(0, cur.rowcount or 0)
+
+
     def purge_messages(self, bot_id: str, days: int = 14) -> int:
         """超过保留期的原始聊天记录直接删掉。"""
         cutoff = _now() - max(1, int(days)) * 86400
@@ -582,6 +657,8 @@ class MessagesMixin(_StoreBase):
             )
             self.conn.commit()
             return max(0, cur.rowcount or 0)
+
+
     def compress_messages(self, bot_id: str, after_days: int = 3, keep_days: int = 14) -> Dict[str, int]:
         """把 N 天前的原始聊天按「会话 + 天」压成一条摘要，超过保留期连摘要一起删。"""
         now = _now()
@@ -655,3 +732,4 @@ class MessagesMixin(_StoreBase):
             counts["purged"] = max(0, cur.rowcount or 0)
             self.conn.commit()
         return counts
+

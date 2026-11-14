@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""上架审核的两条硬规矩，用源码守卫盯着，别再回退。
-
-1. logger 只能从 astrbot.api 导入，严禁回退内置 logging；
-2. async 处理函数里不许同步调 store.recall（开了语义召回时会走 HTTP，会堵事件循环）。
-"""
-
+"""上架审核的两条硬规矩，用源码守卫盯着，别再回退。"""
+import glob
 import os
 import unittest
 
@@ -18,12 +14,9 @@ def read(name):
 
 class LoggingRuleTests(unittest.TestCase):
     def test_store_does_not_fallback_to_builtin_logging(self):
-        # store.py 拆成 store_*.py 之后，守卫要扫整组模块，而不是只看入口
-        names = sorted(
-            name for name in os.listdir(ROOT)
-            if name.startswith("store") and name.endswith(".py")
-        )
-        self.assertIn("store.py", names)
+        names = ["store.py", "models/memory_db.py", "core/api.py"]
+        names += [p.replace(ROOT + os.sep, "").replace("\\", "/")
+                  for p in glob.glob(os.path.join(ROOT, "services", "*.py"))]
         for name in names:
             body = read(name)
             self.assertNotIn("import logging", body, name)
@@ -34,7 +27,7 @@ class LoggingRuleTests(unittest.TestCase):
 
 class AsyncBlockingTests(unittest.TestCase):
     def test_api_memories_offloads_recall(self):
-        body = read("main.py")
+        body = read("core/web_handlers.py")
         start = body.index("async def api_memories")
         end = body.index("async def api_memory_save", start)
         segment = body[start:end]
@@ -42,7 +35,7 @@ class AsyncBlockingTests(unittest.TestCase):
         self.assertNotIn("self.store.recall(", segment)
 
     def test_memory_api_recall_offloads(self):
-        body = read("main.py")
+        body = read("core/api.py")
         start = body.index("async def recall", body.index("class MemoryAPI"))
         segment = body[start:start + 900]
         self.assertIn("asyncio.to_thread", segment)

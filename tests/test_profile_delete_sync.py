@@ -69,7 +69,7 @@ class ForgetInAmoTests(unittest.TestCase):
 
 class HandlerWiringTests(unittest.TestCase):
     def test_delete_handler_calls_forget(self):
-        src = open(os.path.join(_ROOT, "main.py"), encoding="utf-8").read()
+        src = open(os.path.join(_ROOT, "core", "web_handlers.py"), encoding="utf-8").read()
         body = src[src.index("async def api_profile_delete"):src.index("async def api_persons")]
         self.assertIn("_forget_in_amo(uid)", body)
 

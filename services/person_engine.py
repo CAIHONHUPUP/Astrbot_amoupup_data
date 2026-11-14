@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""画像 / 身份归一 / 人物合并 / 人物上下文。"""
+"""services/person_engine.py —— 人物、跨平台身份、关系网。"""
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
 import sqlite3
 
-if TYPE_CHECKING:  # 只给类型检查看：包内相对导入
-    from .store_util import (
+from typing import Any, Dict, List, Optional
+
+try:  # AstrBot 包模式
+    from ..utils.text_process import (
+        Any,
+        Dict,
+        List,
         _bot_filter,
         _clean,
         _name_key,
@@ -20,139 +20,54 @@ if TYPE_CHECKING:  # 只给类型检查看：包内相对导入
         logger,
         platform_label,
     )
-else:  # 运行时：包模式优先，按文件直接加载时退回绝对导入
-    try:
-        from .store_util import (
-            _bot_filter,
-            _clean,
-            _name_key,
-            _now,
-            _unique_labels,
-            logger,
-            platform_label,
-        )
-    except ImportError:  # 直接按文件加载时
-        from store_util import (
-            _bot_filter,
-            _clean,
-            _name_key,
-            _now,
-            _unique_labels,
-            logger,
-            platform_label,
-        )
+except ImportError:  # 顶层导入（测试/脚本）
+    from utils.text_process import (
+        Any,
+        Dict,
+        List,
+        _bot_filter,
+        _clean,
+        _name_key,
+        _now,
+        _unique_labels,
+        logger,
+        platform_label,
+    )
 
 
-if TYPE_CHECKING:
-    from .store_types import StoreLike as _StoreBase
-else:  # 运行时用 object：协议里的声明不能进 MRO，否则会挡掉别的 mixin 的真实实现
-    _StoreBase = object
+class PersonEngine:
+    """认人/绑定/合并/关系网；画像与记忆各归各的引擎。"""
 
+    def __init__(self, db, settings=None, persons=None):
+        self.db = db
+        self.settings = settings if settings is not None else {}
+        self.persons = persons
+        self.plugin = None
+        self._canonical_cache = {}
 
-class PeopleMixin(_StoreBase):
-    def get_profile(self, bot_id: str, uid: str) -> Dict[str, Any]:
-        with self.lock:
-            row = self.conn.execute(
-                "SELECT name, alias, relation, remark, updated_at FROM profiles "
-                "WHERE bot_id=? AND uid=?",
-                (str(bot_id), str(uid)),
-            ).fetchone()
-        if not row:
-            return {
-                "uid": str(uid), "name": "", "alias": "", "relation": "",
-                "remark": "", "updated_at": 0, "exists": False,
-            }
-        return {
-            "uid": str(uid),
-            "name": str(row["name"] or ""),
-            "alias": str(row["alias"] or ""),
-            "relation": str(row["relation"] or ""),
-            "remark": str(row["remark"] or ""),
-            "updated_at": int(row["updated_at"] or 0),
-            "exists": True,
-        }
-    def find_profile(self, uid: str) -> Dict[str, Any]:
-        """跨 bot 找画像：面板默认聚合所有 bot，编辑时要先知道这条属于哪个 bot。"""
-        uid = str(uid)
-        if not uid:
-            return {}
-        with self.lock:
-            row = self.conn.execute(
-                "SELECT bot_id FROM profiles WHERE uid=? ORDER BY updated_at DESC LIMIT 1",
-                (uid,),
-            ).fetchone()
-        if not row:
-            return {}
-        bot_id = str(row["bot_id"] or "")
-        profile = self.get_profile(bot_id, uid)
-        profile["bot_id"] = bot_id
-        return profile
-    def save_profile(
-        self,
-        bot_id: str,
-        uid: str,
-        name: Optional[str] = None,
-        alias: Optional[str] = None,
-        relation: Optional[str] = None,
-        remark: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """只更新传进来的字段，没传的保持原值；整条不存在就新建。"""
-        bot_id, uid = str(bot_id), str(uid)
-        with self.lock:
-            current = self.get_profile(bot_id, uid)
-            merged = {
-                "name": current["name"] if name is None else _clean(name, 64),
-                "alias": current["alias"] if alias is None else _clean(alias, 128),
-                "relation": current["relation"] if relation is None else _clean(relation, 32),
-                "remark": current["remark"] if remark is None else _clean(remark, 500),
-            }
-            self.conn.execute(
-                "INSERT INTO profiles(bot_id, uid, name, alias, relation, remark, updated_at) "
-                "VALUES(?,?,?,?,?,?,?) "
-                "ON CONFLICT(bot_id, uid) DO UPDATE SET "
-                "name=excluded.name, alias=excluded.alias, relation=excluded.relation, "
-                "remark=excluded.remark, updated_at=excluded.updated_at",
-                (bot_id, uid, merged["name"], merged["alias"], merged["relation"],
-                 merged["remark"], _now()),
-            )
-            # 画像改名后，人物卡的名字也要跟着改：否则会一直显示最早建档时的旧名字
-            if merged["name"]:
-                self.conn.execute(
-                    "UPDATE persons SET name=? WHERE bot_id=? AND pid IN "
-                    "(SELECT pid FROM person_links WHERE bot_id=? AND uid=?)",
-                    (merged["name"], bot_id, bot_id, uid),
-                )
-            self.conn.commit()
-        return self.get_profile(bot_id, uid)
-    def list_profiles(self, bot_id: str, keyword: str = "", limit: int = 100) -> List[Dict[str, Any]]:
-        where, params = _bot_filter(bot_id)
-        sql = "SELECT uid, name, alias, relation, remark, updated_at FROM profiles WHERE 1=1" + where
-        if keyword:
-            sql += " AND (uid LIKE ? OR name LIKE ? OR alias LIKE ? OR remark LIKE ?)"
-            like = "%" + str(keyword) + "%"
-            params.extend([like, like, like, like])
-        sql += " ORDER BY updated_at DESC LIMIT ?"
-        params.append(max(1, min(int(limit), 500)))
-        with self.lock:
-            rows = self.conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
-    def delete_profile(self, bot_id: str, uid: str) -> Dict[str, int]:
-        """删画像，连带这个人的记忆、关系边和缓存。"""
-        bot_id, uid = str(bot_id), str(uid)
-        counts: Dict[str, int] = {}
-        with self.lock:
-            pid = self.pid_for_uid(bot_id, uid)
-            for table, sql, params in (
-                ("profiles", "DELETE FROM profiles WHERE bot_id=? AND uid=?", (bot_id, uid)),
-                ("memories", "DELETE FROM memories WHERE bot_id=? AND (uid=? OR pid=?)",
-                 (bot_id, uid, int(pid))),
-                ("relations", "DELETE FROM relations WHERE bot_id=? AND (a_uid=? OR b_uid=?)",
-                 (bot_id, uid, uid)),
-            ):
-                cur = self.conn.execute(sql, params)
-                counts[table] = max(0, cur.rowcount or 0)
-            self.conn.commit()
-        return counts
+    # ---- 迁移期适配：老 mixin 里直接用了 self.conn / self.lock / self.setting ----
+    @property
+    def conn(self) -> sqlite3.Connection:
+        return self.db.conn
+
+    @property
+    def lock(self):
+        return self.db.lock
+
+    def setting(self, key: str, default: Any = None) -> Any:
+        return self.settings.get(key, default)
+
+    # 中文时间词（原 DataStore 上的类属性，聊天时间窗解析要用）
+    _CN_NUM = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+               "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    _PERIODS = (
+        (("凌晨",), 0, 6),
+        (("早上", "早晨", "上午"), 6, 12),
+        (("中午",), 11, 14),
+        (("下午",), 12, 18),
+        (("傍晚", "晚上", "今晚", "昨晚", "夜里", "深夜"), 18, 24),
+    )
+
     def resolve_person(
         self, bot_id: str, platform: str, uid: str, name: str = "", auto_merge: bool = True
     ) -> int:
@@ -221,6 +136,8 @@ class PeopleMixin(_StoreBase):
             self._backfill_messages(bot_id, platform, uid, target)
             self.conn.commit()
             return target
+
+
     def _backfill_messages(self, bot_id: str, platform: str, uid: str, pid: int) -> None:
         try:
             self.conn.execute(
@@ -231,6 +148,8 @@ class PeopleMixin(_StoreBase):
             )
         except Exception:
             pass
+
+
     def link_identity(self, bot_id: str, platform: str, uid: str, pid: int = 0,
                       name: str = "") -> int:
         """手动把某个 (平台, uid) 绑到指定人物；pid=0 表示新建人物。"""
@@ -267,6 +186,8 @@ class PeopleMixin(_StoreBase):
             self._backfill_messages(bot_id, platform, uid, pid)
             self.conn.commit()
             return pid
+
+
     def unlink_identity(self, bot_id: str, platform: str, uid: str) -> bool:
         """解绑：这个身份单独变成一个人物，不删聊天记录。"""
         self.clear_canonical_cache()
@@ -300,6 +221,8 @@ class PeopleMixin(_StoreBase):
                     self.conn.execute("DELETE FROM persons WHERE pid=?", (old_pid,))
             self.conn.commit()
             return True
+
+
     def merge_persons(self, bot_id: str, keep_pid: int, drop_pid: int) -> bool:
         """把 drop 合并进 keep：身份、聊天记录、记忆都并过去，然后删掉 drop。"""
         self.clear_canonical_cache()
@@ -355,6 +278,8 @@ class PeopleMixin(_StoreBase):
             )
             self.conn.commit()
             return True
+
+
     def person_links(self, bot_id: str, pid: int) -> List[Dict[str, Any]]:
         with self.lock:
             rows = self.conn.execute(
@@ -372,6 +297,8 @@ class PeopleMixin(_StoreBase):
             }
             for row in rows
         ]
+
+
     def list_persons(self, bot_id: str = "", keyword: str = "", limit: int = 100) -> List[Dict[str, Any]]:
         where, params = _bot_filter(bot_id)
         sql = "SELECT pid, bot_id, name, updated_at FROM persons WHERE 1=1" + where
@@ -407,6 +334,8 @@ class PeopleMixin(_StoreBase):
                     "updated_at": int(row["updated_at"] or 0),
                 })
         return out
+
+
     def person_detail(self, bot_id: str, pid: int) -> Dict[str, Any]:
         with self.lock:
             row = self.conn.execute(
@@ -423,7 +352,7 @@ class PeopleMixin(_StoreBase):
             ).fetchone()
             profiles = []
             for item in links:
-                profile = self.get_profile(bot, item["uid"])
+                profile = self.plugin.profiles.get_profile(bot, item["uid"])
                 if profile.get("exists"):
                     profiles.append(profile)
             rows = self.conn.execute(
@@ -449,6 +378,8 @@ class PeopleMixin(_StoreBase):
             "created_at": int(row["created_at"] or 0),
             "updated_at": int(row["updated_at"] or 0),
         }
+
+
     def _alias_of(self, bot_id: str, platform: str, uid: str):
         """把一个 (平台, uid) 换成规范身份；没配别名就原样返回。"""
         platform, uid = str(platform or ""), str(uid)
@@ -464,6 +395,8 @@ class PeopleMixin(_StoreBase):
         if row and str(row["alias_platform"] or "").strip():
             return (str(row["alias_platform"]), str(row["alias_uid"]))
         return (platform, uid)
+
+
     def set_identity_alias(self, bot_id: str, platform: str, uid: str,
                            alias_platform: str = "", alias_uid: str = "") -> bool:
         """登记「导出的旧身份」→「规范身份」，之后 resolve_person 会自动走别名。"""
@@ -482,6 +415,8 @@ class PeopleMixin(_StoreBase):
             return True
         except Exception:
             return False
+
+
     def list_identity_aliases(self, bot_id: str = "") -> List[Dict[str, Any]]:
         where, params = _bot_filter(bot_id)
         try:
@@ -493,6 +428,8 @@ class PeopleMixin(_StoreBase):
             return [dict(row) for row in rows]
         except Exception:
             return []
+
+
     def merge_ghost_persons(self) -> int:
         """把「只有摘要、没有档案也没有记忆」的幽灵人物并进唯一有档案的那个人。
 
@@ -551,6 +488,7 @@ class PeopleMixin(_StoreBase):
                         )
         return merged
 
+
     def repair_persons(self) -> int:
         """人物表自愈：身份指向一个已经不存在的人物时，把人物补回来。
 
@@ -582,6 +520,7 @@ class PeopleMixin(_StoreBase):
                 logger.warning("[amo_data] 人物表自愈：补回 %d 个丢失的人物" % fixed)
         self.clear_canonical_cache()
         return fixed
+
 
     def adopt_orphan_memories(self) -> int:
         """没有身份记录的记忆（pid=0 且 uid 不在 person_links 里）。
@@ -667,6 +606,7 @@ class PeopleMixin(_StoreBase):
                 logger.info("[amo_data] 孤儿记忆归位 %d 条" % adopted)
         return adopted
 
+
     def pid_for_uid(self, bot_id: str, uid: str) -> int:
         """只有 uid 时反查 pid（不分平台）；查不到返回 0。"""
         uid = str(uid or "")
@@ -681,6 +621,7 @@ class PeopleMixin(_StoreBase):
         except Exception:
             return 0
         return int(row["pid"] or 0) if row else 0
+
 
     def person_pid(self, bot_id: str, platform: str, uid: str) -> int:
         """(平台, uid) → pid；先过别名表。只查不建，查不到返回 0。"""
@@ -697,6 +638,7 @@ class PeopleMixin(_StoreBase):
             return 0
         return int(row["pid"] or 0) if row else 0
 
+
     def _canonical_link(self, links, fallback: str = "") -> str:
         """同一个人选一个主身份：优先飞书 open_id，其次第一条。"""
         for item in links or []:
@@ -710,6 +652,7 @@ class PeopleMixin(_StoreBase):
                 return uid
         return str(fallback or "")
 
+
     def _canonical_cache_get(self):
         cache = getattr(self, "_canonical_cache", None)
         if cache is None:
@@ -717,8 +660,10 @@ class PeopleMixin(_StoreBase):
             self._canonical_cache = cache
         return cache
 
+
     def clear_canonical_cache(self) -> None:
         self._canonical_cache = {}
+
 
     def canonical_uid(self, bot_id: str, platform: str, uid: str) -> str:
         """把任意平台身份换成这个人的主 uid（飞书优先），写消息/记忆时用。"""
@@ -745,6 +690,7 @@ class PeopleMixin(_StoreBase):
         cache[key] = result
         return result
 
+
     def canonical_uid_for_uid(self, bot_id: str, uid: str) -> str:
         """没有平台信息时（remember 只带 uid）按 uid 找主身份。"""
         uid = str(uid or "")
@@ -769,6 +715,7 @@ class PeopleMixin(_StoreBase):
         result = self._canonical_link([dict(item) for item in links], uid)
         cache[key] = result
         return result
+
 
     def normalize_identities(self, bot_id: str = "") -> int:
         """把旧数据里飞书 open_id / QQ 号混用的 uid 统一成主 uid。"""
@@ -823,6 +770,7 @@ class PeopleMixin(_StoreBase):
             self.clear_canonical_cache()
             return changed
 
+
     def person_of(self, bot_id: str, platform: str, uid: str) -> Dict[str, Any]:
         platform, uid = self._alias_of(str(bot_id), str(platform or ""), str(uid))
         with self.lock:
@@ -833,6 +781,19 @@ class PeopleMixin(_StoreBase):
         if not row:
             return {}
         return self.person_detail(str(bot_id), int(row["pid"] or 0))
+
+
+
+
+    def bootstrap(self) -> None:
+        """启动自愈（原 store.__init__ 里做的那几件事）。失败只告警，不挡启动。"""
+        for fn in (self.normalize_identities, self.repair_persons,
+                   self.adopt_orphan_memories, self.merge_ghost_persons):
+            try:
+                fn()
+            except Exception:
+                pass
+
     def person_context(
         self, bot_id: str, platform: str, uid: str, limit: int = 8
     ) -> Dict[str, Any]:
@@ -906,14 +867,14 @@ class PeopleMixin(_StoreBase):
                     memories.append(row)
 
             if pid_value:
-                _take(self.list_memories(str(bot_id), limit=limit, pid=pid_value))
+                _take(self.plugin.memory.list_memories(str(bot_id), limit=limit, pid=pid_value))
             uid_candidates = [str(uid)] + [str(item.get("uid") or "") for item in detail.get("links", [])]
             seen_uids = set()
             for one_uid in uid_candidates:
                 if not one_uid or one_uid in seen_uids:
                     continue
                 seen_uids.add(one_uid)
-                _take(self.list_memories(str(bot_id), uid=one_uid, limit=limit))
+                _take(self.plugin.memory.list_memories(str(bot_id), uid=one_uid, limit=limit))
             memories = memories[: limit]
         except Exception:
             memories = []
@@ -924,3 +885,76 @@ class PeopleMixin(_StoreBase):
         detail["recent"] = recent
         detail["memories"] = memories
         return detail
+
+
+    def _display_name(self, bot_id: str, uid: Any) -> str:
+        """关系图上的显示名：先画像，再人物卡，最后空。"""
+        uid = str(uid or "")
+        if not uid:
+            return ""
+        try:
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT name FROM profiles WHERE bot_id=? AND uid=? AND name!=''", (bot_id, uid)
+                ).fetchone()
+            if row and str(row["name"] or "").strip():
+                return str(row["name"]).strip()
+        except Exception:
+            pass
+        try:
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT p.name FROM person_links l JOIN persons p ON p.pid=l.pid "
+                    "WHERE l.bot_id=? AND l.uid=? AND p.name!='' LIMIT 1", (bot_id, uid)
+                ).fetchone()
+            if row and str(row["name"] or "").strip():
+                return str(row["name"]).strip()
+        except Exception:
+            pass
+        return ""
+
+
+    def list_relations(self, bot_id: str, uid: str = "") -> List[Dict[str, Any]]:
+        where, params = _bot_filter(bot_id)
+        sql = "SELECT a_uid, b_uid, relation, note, updated_at FROM relations WHERE 1=1" + where
+        if uid:
+            sql += " AND (a_uid=? OR b_uid=?)"
+            params.extend([str(uid), str(uid)])
+        sql += " ORDER BY updated_at DESC"
+        with self.lock:
+            rows = self.conn.execute(sql, params).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["a_name"] = self._display_name(str(bot_id), item.get("a_uid"))
+            item["b_name"] = self._display_name(str(bot_id), item.get("b_uid"))
+            out.append(item)
+        return out
+
+
+    def save_relation(
+        self, bot_id: str, a_uid: str, b_uid: str, relation: str, note: str = ""
+    ) -> bool:
+        a_uid, b_uid = str(a_uid), str(b_uid)
+        if not a_uid or not b_uid or a_uid == b_uid:
+            return False
+        with self.lock:
+            self.conn.execute(
+                "INSERT INTO relations(bot_id, a_uid, b_uid, relation, note, updated_at) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(bot_id, a_uid, b_uid) DO UPDATE SET "
+                "relation=excluded.relation, note=excluded.note, updated_at=excluded.updated_at",
+                (str(bot_id), a_uid, b_uid, _clean(relation, 32) or "朋友", _clean(note, 200), _now()),
+            )
+            self.conn.commit()
+        return True
+
+
+    def delete_relation(self, bot_id: str, a_uid: str, b_uid: str) -> bool:
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM relations WHERE bot_id=? AND a_uid=? AND b_uid=?",
+                (str(bot_id), str(a_uid), str(b_uid)),
+            )
+            self.conn.commit()
+            return bool(cur.rowcount)
+
