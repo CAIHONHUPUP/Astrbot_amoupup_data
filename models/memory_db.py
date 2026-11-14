@@ -140,7 +140,9 @@ class MemoryDB:
                     DELETE FROM memories_fts WHERE rowid = old.id;
                 END;
                 CREATE TRIGGER IF NOT EXISTS mem_au AFTER UPDATE OF content ON memories BEGIN
-                    UPDATE memories_fts SET content = new.content WHERE rowid = old.id;
+                    INSERT INTO memories_fts(memories_fts, rowid, content)
+                        VALUES('delete', old.id, old.content);
+                    INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
                 END;
 
                 CREATE TABLE IF NOT EXISTS memory_vec (
@@ -232,6 +234,33 @@ class MemoryDB:
                 """
             )
             conn.commit()
+            # 2026-11-14：旧版 mem_au 直接 UPDATE 外部内容 FTS，特定中文会报
+            # "database disk image is malformed"；改成 FTS5 标准的 delete+insert，
+            # 并重建一次索引修复老库里可能已损坏的 FTS 数据。
+            try:
+                with self.lock:
+                    conn = self.conn
+                    conn.executescript(
+                        """
+                        DROP TRIGGER IF EXISTS mem_au;
+                        CREATE TRIGGER mem_au AFTER UPDATE OF content ON memories BEGIN
+                            INSERT INTO memories_fts(memories_fts, rowid, content)
+                                VALUES('delete', old.id, old.content);
+                            INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+                        END;
+                        """
+                    )
+                    marker = conn.execute(
+                        "SELECT value FROM store_meta WHERE key='fts_rebuild_v2'"
+                    ).fetchone()
+                    if not marker:
+                        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                        conn.execute(
+                            "INSERT OR REPLACE INTO store_meta(key, value) VALUES('fts_rebuild_v2', '1')"
+                        )
+                    conn.commit()
+            except Exception:
+                pass
 
     def _init_trigram_fts(self) -> None:
         """建 trigram FTS5 表做子串粗筛；SQLite 不支持时自动停用。

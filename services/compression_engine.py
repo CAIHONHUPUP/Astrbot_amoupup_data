@@ -13,9 +13,11 @@ from typing import Any, Dict, List
 
 try:
     from ..models.dao import MemoryDao
+    from ..services import fact_dedupe
     from ..utils.text_process import _bot_filter, _now, _recall_tokens, logger
 except ImportError:  # 顶层导入（测试/脚本）
     from models.dao import MemoryDao
+    from services import fact_dedupe
     from utils.text_process import _bot_filter, _now, _recall_tokens, logger
 
 # 句子边界：中文句号/问号/叹号/分号/换行；用 lookbehind 保留分隔符，拼回去还是原文
@@ -103,6 +105,90 @@ class CompressionEngine:
                 self.memory._enqueue_embedding(int(row["id"]), pieces[0])
         return {"summaries": summaries, "created": created, "applied": bool(apply)}
 
+    def compress_facts(self, bot_id: str, apply: bool = True,
+                       rows=None, limit: int = 600) -> Dict[str, Any]:
+        """事实级压缩：同一事实合并细节、负状态覆盖、60 天低权重衰减。
+
+        只处理静态事实（偏好/人设/关系/资产），消费/交易/摘要永远不动。
+        """
+        if rows is None:
+            where, params = _bot_filter(bot_id)
+            rows = self.dao.active_rows(where, params, limit)
+        groups: Dict[Any, List[sqlite3.Row]] = {}
+        for row in rows:
+            kind = str(row["kind"] or "")
+            if not fact_dedupe.is_static_kind(kind):
+                continue
+            key = fact_dedupe.fact_key(str(row["content"] or ""))
+            if not key:
+                continue
+            gkey = (str(row["uid"] or ""), str(row["scope"] or ""),
+                    str(row["group_id"] or ""), key)
+            groups.setdefault(gkey, []).append(row)
+        merged = expired = 0
+        for items in groups.values():
+            if len(items) < 2:
+                continue
+            if not apply:
+                merged += len(items) - 1
+                continue
+            neg = [r for r in items if fact_dedupe.fact_state(str(r["content"] or "")) == "neg"]
+            pos = [r for r in items if r not in neg]
+            if neg and pos:
+                keep = max(neg, key=lambda r: int(r["created_at"] or 0))
+                old_ids = [int(r["id"]) for r in pos]
+                with self.lock:
+                    self.dao.conn.executemany(
+                        "UPDATE memories SET status='expired', superseded_by=? WHERE id=?",
+                        [(int(keep["id"]), old_id) for old_id in old_ids],
+                    )
+                    self.dao.conn.commit()
+                expired += len(old_ids)
+                items = [r for r in items if int(r["id"]) not in set(old_ids)]
+                if len(items) < 2:
+                    continue
+            base = max(items, key=lambda r: (float(r["importance"] or 0),
+                                             len(str(r["content"] or ""))))
+            text = str(base["content"] or "")
+            for other in items:
+                if other is base:
+                    continue
+                text = fact_dedupe.merge_fact(text, str(other["content"] or ""))
+            top = max(float(r["importance"] or 0) for r in items)
+            importance = min(1.0, top + 0.05 * (len(items) - 1))
+            with self.lock:
+                self.dao.conn.execute(
+                    "UPDATE memories SET content=?, importance=?, "
+                    "merged_count=merged_count+? WHERE id=?",
+                    (text, importance, len(items) - 1, int(base["id"])),
+                )
+                self.dao.conn.executemany(
+                    "UPDATE memories SET status='merged', superseded_by=? WHERE id=?",
+                    [(int(base["id"]), int(r["id"])) for r in items if r is not base],
+                )
+                self.dao.conn.commit()
+            merged += len(items) - 1
+        # 遗忘曲线：60 天没被检索/提及的低权重静态事实，慢慢降权
+        decayed = 0
+        cutoff = _now() - 60 * 86400
+        if apply:
+            for row in rows:
+                if not fact_dedupe.is_static_kind(str(row["kind"] or "")):
+                    continue
+                if int(row["last_hit_at"] or 0) > cutoff:
+                    continue
+                importance = float(row["importance"] or 0)
+                if importance <= 0.2:
+                    continue
+                with self.lock:
+                    self.dao.conn.execute(
+                        "UPDATE memories SET importance=? WHERE id=?",
+                        (max(0.1, importance - 0.05), int(row["id"])),
+                    )
+                    self.dao.conn.commit()
+                decayed += 1
+        return {"merged": merged, "expired": expired, "decayed": decayed}
+
     def compress_memories(self, bot_id: str, apply: bool = True,
                           min_jaccard: float = 0.7, limit: int = 600) -> Dict[str, Any]:
         """周度整理：长摘要拆条、同一天摘要合并、近重复记忆标成过期（不删数据）。"""
@@ -128,26 +214,26 @@ class CompressionEngine:
             keep = items[0]
             drop = items[1:]
             absorbed: List[sqlite3.Row] = []
-            if apply:
-                # 同一批摘要各有信息：把正文拼到保留的那条上，再标记别条（不丢内容）
-                merged_text = str(keep["content"] or "")
-                for row in drop:
-                    piece = str(row["content"] or "").strip()
-                    if not piece or piece in merged_text:
-                        absorbed.append(row)  # 正文已经在保留行里，标 merged 不会丢内容
-                        continue
-                    candidate = merged_text + "\n" + piece
-                    if len(candidate) > (cap or 4000):
-                        break  # 超预算：这条和后面的都保持 active，绝不带病标 merged
-                    merged_text = candidate
-                    absorbed.append(row)
-                if absorbed:
-                    self.dao.merge_summary(
-                        int(keep["id"]), merged_text, len(absorbed),
-                        max([float(r["importance"] or 0) for r in items]),
-                    )
-                    self.dao.mark_merged(int(keep["id"]), [int(r["id"]) for r in absorbed])
-            merged += len(absorbed) if apply else 0
+            # 同一批摘要各有信息：把正文拼到保留的那条上，再标记别条（不丢内容）。
+            # 预演（apply=False）也走同样的拼接，否则预演永远显示「会合并 0 条」。
+            merged_text = str(keep["content"] or "")
+            for row in drop:
+                piece = str(row["content"] or "").strip()
+                if not piece or piece in merged_text:
+                    absorbed.append(row)  # 正文已经在保留行里，标 merged 不会丢内容
+                    continue
+                candidate = merged_text + "\n" + piece
+                if len(candidate) > (cap or 4000):
+                    break  # 超预算：这条和后面的都保持 active，绝不带病标 merged
+                merged_text = candidate
+                absorbed.append(row)
+            merged += len(absorbed)
+            if apply and absorbed:
+                self.dao.merge_summary(
+                    int(keep["id"]), merged_text, len(absorbed),
+                    max([float(r["importance"] or 0) for r in items]),
+                )
+                self.dao.mark_merged(int(keep["id"]), [int(r["id"]) for r in absorbed])
 
         # 通用近重复（只处理最近 limit 条，代价可控）
         dedup = 0
@@ -187,7 +273,11 @@ class CompressionEngine:
                     dedup += 1
             if apply and dedup:
                 self.dao.conn.commit()
+        fact_info = self.compress_facts(bot_id, apply=apply, rows=rows)
         return {"merged_summaries": merged, "merged_near_duplicates": dedup,
+                "merged_facts": fact_info.get("merged", 0),
+                "expired_facts": fact_info.get("expired", 0),
+                "decayed": fact_info.get("decayed", 0),
                 "split_summaries": split_info.get("summaries", 0),
                 "split_pieces": split_info.get("created", 0),
                 "applied": bool(apply)}

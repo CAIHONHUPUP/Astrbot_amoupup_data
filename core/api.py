@@ -287,7 +287,7 @@ class MemoryAPI:
 
     async def purge_logs(self, bot_id: str, days: int = 7) -> int:
         try:
-            return self._p.logs.purge(self._bot(bot_id), days)
+            return self._p.logs.purge_logs(self._bot(bot_id), days)
         except Exception:
             return 0
 

@@ -15,11 +15,13 @@ from typing import Any, Dict, List, Optional
 
 try:
     from ..models.dao import MemoryDao
+    from ..services import fact_dedupe
     from ..utils.text_process import (
         STOP_BIGRAMS, _clean, _jaccard, _now, _norm_key, _recall_tokens, _slot_facts, logger,
     )
 except ImportError:  # 顶层导入（测试/脚本）
     from models.dao import MemoryDao
+    from services import fact_dedupe
     from utils.text_process import (
         STOP_BIGRAMS, _clean, _jaccard, _now, _norm_key, _recall_tokens, _slot_facts, logger,
     )
@@ -206,6 +208,9 @@ class MemoryEngine:
         text = _clean(content)
         if not text:
             return {"ok": False, "reason": "empty"}
+        kind = _clean(kind, 32) or "fact"
+        static = fact_dedupe.is_static_kind(kind)
+        fact = fact_dedupe.fact_key(text) if static else ""
         bot_id, uid = str(bot_id), str(uid)
         platform = str(platform or "").strip()
         pid = 0
@@ -242,18 +247,32 @@ class MemoryEngine:
             hit_count = 0
         idem_key = _clean(idem_key, 120)
         subject = "bot" if str(subject or "").strip().lower() == "bot" else "user"
-        if not idem_key and self.setting("auto_dedupe", True):
-            idem_key = _norm_key(text)
+        if not idem_key and self.setting("auto_dedupe", True) and static:
+            # 只有静态事实才自动生成去重键；消费/交易/流水账每次都是真实发生，必须逐条存
+            idem_key = ("fact:" + fact) if fact else _norm_key(text)
 
         if idem_key:
             row = self.dao.find_active_by_idem(bot_id, uid, scope, group_id, idem_key)
             if row:
-                # 同一件事又说了一遍：抬一点重要度、刷新时间，不新增行
-                self.dao.touch(int(row["id"]), importance, now, subject)
+                # 同一件事又说了一遍：抬重要度、刷新时间、合并细节，不新增行
+                try:
+                    boost = min(1.0, max(float(row["importance"] or 0), float(importance)) + 0.03)
+                except (TypeError, ValueError):
+                    boost = importance
+                if fact:
+                    old_text = str(row["content"] or "")
+                    merged = fact_dedupe.merge_fact(old_text, text)
+                    if merged and merged != old_text:
+                        self.dao.merge_content(int(row["id"]), merged, boost, now, subject, False)
+                        self._enqueue_embedding(int(row["id"]), merged)
+                    else:
+                        self.dao.touch(int(row["id"]), boost, now, subject)
+                else:
+                    self.dao.touch(int(row["id"]), boost, now, subject)
                 return {"ok": True, "memory_id": int(row["id"]), "duplicate": True}
 
         # 近重复（换了标点/语序）也合并：二元组 Jaccard 超过阈值
-        if self.setting("auto_dedupe", True):
+        if self.setting("auto_dedupe", True) and static:
             cand = self._near_duplicate(bot_id, uid, scope, group_id, text)
             if cand is not None:
                 self.dao.merge_content(int(cand["id"]), text, importance, now, subject,
@@ -276,8 +295,13 @@ class MemoryEngine:
             superseded = self._detect_supersede(bot_id, uid, scope, group_id, memory_id, text)
         except Exception:
             superseded = []
+        try:
+            expired = self._detect_fact_reversal(
+                bot_id, uid, scope, group_id, memory_id, text, static)
+        except Exception:
+            expired = []
         return {"ok": True, "memory_id": memory_id, "duplicate": False,
-                "created_at": created_at, "superseded": superseded}
+                "created_at": created_at, "superseded": superseded, "expired": expired}
 
     def _near_duplicate(self, bot_id: str, uid: str, scope: str, group_id: str,
                         text: str):
@@ -299,6 +323,29 @@ class MemoryEngine:
             if _jaccard(tokens, other) >= ratio:
                 return row
         return None
+
+    def _detect_fact_reversal(self, bot_id: str, uid: str, scope: str, group_id: str,
+                              new_id: int, text: str, static: bool) -> List[int]:
+        """偏好/状态反转（“不爱吃了/改喝热的”）：旧记忆标 expired，不物理删除。"""
+        if not static:
+            return []
+        rows = self.dao.recent(bot_id, uid, scope, group_id, 200)
+        old_ids: List[int] = []
+        for row in rows:
+            if int(row["id"]) == int(new_id):
+                continue
+            old_text = str(row["content"] or "")
+            if fact_dedupe.should_expire(old_text, text):
+                old_ids.append(int(row["id"]))
+                continue
+            old_key = fact_dedupe.fact_key(old_text)
+            if old_key and old_key == fact_dedupe.fact_key(text):
+                old_ids.append(int(row["id"]))
+        if old_ids:
+            self.dao.supersede(int(new_id), old_ids)
+            logger.info("[MEMORY] 状态反转：%d 条旧记忆标 expired（新：%s）",
+                        len(old_ids), text[:40])
+        return old_ids
 
     def _detect_supersede(self, bot_id: str, uid: str, scope: str, group_id: str,
                           new_id: int, text: str) -> List[int]:
@@ -333,6 +380,15 @@ class MemoryEngine:
     def mark_superseded(self, memory_id: int, by_id: int = 0) -> bool:
         """手动把一条记忆标成过期（面板/人工纠正用）。"""
         return self.dao.mark_superseded(memory_id, by_id)
+
+    def forget(self, bot_id: str, keyword: str) -> int:
+        """管理员 /遗忘 <关键词>：物理删除包含关键词的所有记忆，返回条数。"""
+        body = _clean(keyword, 50)
+        if not body:
+            return 0
+        count = self.dao.delete_by_keyword(str(bot_id), body)
+        logger.info("[MEMORY] /遗忘「%s」：删除 %d 条", body, count)
+        return count
 
     # ---------- 读/删 ----------
     def list_memories(self, bot_id: str, uid: str = "", limit: int = 100,

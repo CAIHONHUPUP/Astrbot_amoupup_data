@@ -7,37 +7,31 @@ import json
 import re
 import sqlite3
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:  # AstrBot 包模式
     from ..utils.time_query import describe_span as _describe_span
     from ..utils.time_query import parse_time_span as _parse_time_span
     from ..utils.text_process import (
-        Any,
-        Dict,
-        List,
         _bot_filter,
         _clean,
         _clock,
         _now,
+        logger,
         platform_label,
         platform_of_umo,
-        re,
     )
 except ImportError:  # 顶层导入（测试/脚本）
     from utils.time_query import describe_span as _describe_span
     from utils.time_query import parse_time_span as _parse_time_span
     from utils.text_process import (
-        Any,
-        Dict,
-        List,
         _bot_filter,
         _clean,
         _clock,
         _now,
+        logger,
         platform_label,
         platform_of_umo,
-        re,
     )
 
 

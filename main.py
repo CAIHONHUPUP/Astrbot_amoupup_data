@@ -79,7 +79,7 @@ except ImportError:  # 测试/单文件按顶层 import main 时
 _clock = clock  # 兼容老测试/脚本：main._clock
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "3.2.0"  # 与 metadata.yaml 保持一致；发版时统一 bump
+PLUGIN_VERSION = "3.2.1"  # 与 metadata.yaml 保持一致；发版时统一 bump
 DEFAULT_BOT_ID = "default"
 
 
@@ -151,6 +151,22 @@ class AmoDataPlugin(WebAPIMixin, Star):
             logger.warning("[amo_data] /mem_stats 失败: %s" % exc)
             text = "记忆库统计失败：%s" % exc
         yield event.plain_result(text)
+
+    @_command("遗忘")
+    async def forget_cmd(self, event):
+        """管理员 /遗忘 <关键词>：物理删除包含关键词的记忆。"""
+        raw = str(getattr(event, "message_str", "") or "").replace("／", "/").strip()
+        parts = [part for part in raw.split() if part and not part.startswith("@")]
+        keyword = " ".join(parts[1:]).strip()
+        if not keyword:
+            yield event.plain_result("用法：/遗忘 <关键词>")
+            return
+        try:
+            count = self.memory.forget(self._bot_id({}, write=False), keyword)
+            yield event.plain_result("已从记忆中抹除关于 %s 的 %d 条记录。" % (keyword, count))
+        except Exception as exc:
+            logger.warning("[amo_data] /遗忘 失败: %s" % exc)
+            yield event.plain_result("遗忘失败：%s" % exc)
 
     """插件入口：装配 models / services / core，注册面板接口与维护循环。"""
 
@@ -282,6 +298,11 @@ class AmoDataPlugin(WebAPIMixin, Star):
             pass
         try:
             await self.maintenance.stop()
+        except Exception:
+            pass
+        try:
+            # 向量补全后台线程收尾，否则每次热重载泄漏一个线程
+            self.memory.close()
         except Exception:
             pass
         try:

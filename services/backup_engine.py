@@ -219,7 +219,7 @@ class BackupEngine:
                 self.conn.backup(target)
             finally:
                 target.close()
-        self.prune_backups(keep)
+        self.prune_backups(self.backup_dir(), keep)
         return dest
 
     def prune_backups(self, dest_dir: str = "", keep: int = 7) -> int:

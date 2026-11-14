@@ -314,16 +314,26 @@ class RetrievalEngine:
         div_ratio = float(self.setting("diversify_ratio", 0.75) or 0.0)
         items: List[Dict[str, Any]] = []
         selected_tokens: List[set] = []
+        selected_facts = set()
         for item in scored:
             if len(items) >= limit:
                 break
             toks = tokens_by_id.get(int(item["id"]), set())
+            try:
+                from services import fact_dedupe as _facts
+            except ImportError:  # pragma: no cover
+                _facts = None
+            fkey = _facts.fact_key(str(item.get("content") or "")) if _facts else ""
+            if fkey and fkey in selected_facts:
+                continue
             if div_ratio > 0 and toks and any(
                 _jaccard(toks, chosen) >= div_ratio for chosen in selected_tokens
             ):
                 continue
             items.append(item)
             selected_tokens.append(toks)
+            if fkey:
+                selected_facts.add(fkey)
 
         if not items and meta_query:
             items = self._meta_fallback(bot_id, uid, scope, group_id, now,

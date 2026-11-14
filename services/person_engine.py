@@ -5,13 +5,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 try:  # AstrBot 包模式
     from ..utils.text_process import (
-        Any,
-        Dict,
-        List,
         _bot_filter,
         _clean,
         _name_key,
@@ -22,9 +19,6 @@ try:  # AstrBot 包模式
     )
 except ImportError:  # 顶层导入（测试/脚本）
     from utils.text_process import (
-        Any,
-        Dict,
-        List,
         _bot_filter,
         _clean,
         _name_key,
@@ -749,23 +743,29 @@ class PersonEngine:
                     uid = str(item.get("uid") or "")
                     if not uid:
                         continue
-                    cur = self.conn.execute(
-                        "UPDATE messages SET uid=?, pid=? WHERE bot_id=? AND uid=? "
-                        "AND (pid=0 OR pid IS NULL)",
-                        (canonical, pid, str(bot_id), uid),
-                    )
-                    changed += max(0, cur.rowcount or 0)
-                    if uid != canonical:
+                    try:
                         cur = self.conn.execute(
-                            "UPDATE messages SET uid=? WHERE bot_id=? AND pid=? AND role!='bot' AND uid=?",
-                            (canonical, str(bot_id), pid, uid),
+                            "UPDATE messages SET uid=?, pid=? WHERE bot_id=? AND uid=? "
+                            "AND (pid=0 OR pid IS NULL)",
+                            (canonical, pid, str(bot_id), uid),
                         )
                         changed += max(0, cur.rowcount or 0)
-                        cur = self.conn.execute(
-                            "UPDATE memories SET uid=? WHERE bot_id=? AND uid=?",
-                            (canonical, str(bot_id), uid),
-                        )
-                        changed += max(0, cur.rowcount or 0)
+                        if uid != canonical:
+                            cur = self.conn.execute(
+                                "UPDATE messages SET uid=? WHERE bot_id=? AND pid=? AND role!='bot' AND uid=?",
+                                (canonical, str(bot_id), pid, uid),
+                            )
+                            changed += max(0, cur.rowcount or 0)
+                            cur = self.conn.execute(
+                                "UPDATE memories SET uid=? WHERE bot_id=? AND uid=?",
+                                (canonical, str(bot_id), uid),
+                            )
+                            changed += max(0, cur.rowcount or 0)
+                    except sqlite3.IntegrityError as exc:
+                        # 撞唯一索引（idx_mem_idem 含 uid）时只跳过这一条，
+                        # 以前会让整个归一事务半途而废、后面的身份永远留在旧 uid
+                        logger.warning("[amo_data] 身份归一冲突 uid=%s pid=%s: %s", uid, pid, exc)
+                        continue
             self.conn.commit()
             self.clear_canonical_cache()
             return changed
@@ -791,8 +791,10 @@ class PersonEngine:
                    self.adopt_orphan_memories, self.merge_ghost_persons):
             try:
                 fn()
-            except Exception:
-                pass
+            except Exception as exc:
+                # 以前这里 except: pass，身份归一/记忆归位失败完全看不出来
+                logger.warning("[amo_data] 启动自愈 %s 失败: %s",
+                               getattr(fn, "__name__", fn), exc)
 
     def person_context(
         self, bot_id: str, platform: str, uid: str, limit: int = 8

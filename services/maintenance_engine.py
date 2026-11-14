@@ -47,10 +47,15 @@ class MaintenanceEngine:
             self._task = None
 
     async def _loop(self) -> None:
-        """每小时跑一次保留策略。"""
+        """启动 1 分钟后先跑一次，之后每小时一次。
+
+        以前是先 sleep 3600 再跑：只要热重载间隔小于 1 小时，日备份/周整理就永远不执行。
+        """
+        first = True
         while True:
             try:
-                await asyncio.sleep(3600)
+                await asyncio.sleep(60 if first else 3600)
+                first = False
                 await self.run_once()
             except asyncio.CancelledError:
                 return
@@ -61,8 +66,9 @@ class MaintenanceEngine:
         bot_id = self.plugin._bot_id({}, write=True)  # 空 bot_id 会让清理/压缩变成空转
         result: Dict[str, Any] = {}
         try:
-            result["retention"] = await self.retention(
-                bot_id, self.plugin.settings.chat_days,
+            # retention 是同步函数（sqlite + 压缩），放线程池跑，别占事件循环
+            result["retention"] = await asyncio.to_thread(
+                self.retention, bot_id, self.plugin.settings.chat_days,
                 self.plugin.settings.compress_after, self.plugin.settings.log_days,
             )
         except Exception as exc:
@@ -95,7 +101,7 @@ class MaintenanceEngine:
         except Exception as exc:
             result["chat_error"] = str(exc)
         try:
-            result["logs_purged"] = self.plugin.logs.purge(bot_id, int(log_days))
+            result["logs_purged"] = self.plugin.logs.purge_logs(bot_id, int(log_days))
         except Exception as exc:
             result["log_error"] = str(exc)
         return result

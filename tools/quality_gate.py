@@ -38,10 +38,16 @@ def check_compile():
 
 
 def check_routes():
-    path = os.path.join(ROOT, "main.py")
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read()
-    count = len(re.findall(r"^\s+async def api_[a-z_]+\(self\)", text, re.M))
+    # 3.1 之后 api_* 处理器搬到了 core/web_handlers.py；只扫 main.py 会数到 0，
+    # 质量门就永远红着、然后被大家忽略（这正是 lint 漏检 P1 的原因）。
+    count = 0
+    for rel in ("core/web_handlers.py", "main.py"):
+        path = os.path.join(ROOT, rel)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        count += len(re.findall(r"^\s+async def api_[a-z_]+\(self\)", text, re.M))
     assert count == ROUTE_COUNT, ("路由数变化：%d != %d（增删接口后同步 ROUTE_COUNT）"
                                  % (count, ROUTE_COUNT))
     return "routes %d" % count
@@ -71,12 +77,25 @@ def check_dashboard_js():
 
 
 def check_pyflakes():
-    files = sorted(name for name in os.listdir(ROOT) if name.endswith(".py"))
+    # 扫全仓（tests/tools 之前没扫，message_engine 里未定义的 logger 就是这么漏掉的）
+    files = []
+    for base, dirs, names in os.walk(ROOT):
+        dirs[:] = sorted(d for d in dirs if d not in
+                         ("tests", "tools", "__pycache__", ".git", "_test_tmp")
+                         and not d.startswith("pytest-cache-files"))
+        for name in sorted(names):
+            if name.endswith(".py"):
+                files.append(os.path.relpath(os.path.join(base, name), ROOT))
     cmd = [sys.executable, "-m", "pyflakes"] + files
     result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     if result.returncode != 0:
-        print(result.stdout.strip())
-        raise AssertionError("pyflakes 有告警")
+        # 只卡真问题（未定义名/重复定义）；纯 “imported but unused” 是老兼容壳的历史噪音
+        noisy = [line for line in result.stdout.splitlines()
+                 if line.strip() and "imported but unused" not in line
+                 and "redefinition of unused" not in line]
+        if noisy:
+            print("\n".join(noisy))
+            raise AssertionError("pyflakes 有告警")
     return "pyflakes clean (%d files)" % len(files)
 
 

@@ -271,10 +271,20 @@ class MemoryDao:
             self.conn.commit()
         return int(cur.lastrowid or 0)
 
+    def delete_by_keyword(self, bot_id: str, keyword: str) -> int:
+        """物理删除包含关键词的记忆（管理员 /遗忘）。"""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM memories WHERE bot_id=? AND content LIKE ?",
+                (str(bot_id), "%" + str(keyword) + "%"),
+            )
+            self.conn.commit()
+            return int(cur.rowcount or 0)
+
     def active_rows(self, where: str, params: List[Any], limit: int) -> List[sqlite3.Row]:
         with self.lock:
             return self.conn.execute(
-                "SELECT id, uid, content, kind, importance, created_at, hit_count, "
+                "SELECT id, uid, content, kind, importance, created_at, hit_count, last_hit_at, "
                 "COALESCE(scope,'private') AS scope, COALESCE(group_id,'') AS group_id "
                 "FROM memories WHERE 1=1" + where +
                 " AND COALESCE(status,'active')='active' ORDER BY created_at DESC LIMIT ?",

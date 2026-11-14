@@ -3,23 +3,19 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 
 from typing import Any, Dict, List, Optional
 
 try:  # AstrBot 包模式
     from ..utils.text_process import (
-        Any,
-        Dict,
-        List,
         _bot_filter,
         _clean,
         _now,
     )
 except ImportError:  # 顶层导入（测试/脚本）
     from utils.text_process import (
-        Any,
-        Dict,
-        List,
         _bot_filter,
         _clean,
         _now,

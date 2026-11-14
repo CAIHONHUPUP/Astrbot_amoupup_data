@@ -1,3 +1,22 @@
+## 3.2.1（2026-11-15 修复：保留策略真正执行 / 备份按份裁剪 / 身份归一不中断）
+
+- **P1 保留策略从未执行**：`maintenance.run_once` 用 `await` 调同步的 `retention()` →
+  TypeError 被吞进 `chat_error`，聊天压缩、过期日志清理一直空转，日志只增不减。
+  改为 `asyncio.to_thread(self.retention, ...)`；同时把 `logs.purge` 改成真正存在的
+  `purge_logs`（面板的 `purge_logs` 接口也一起修）。
+- **P1 每日备份无限增长**：`backup_now` 把 `keep` 当 `dest_dir` 传给 `prune_backups` →
+  `os.listdir("7")` 抛错、静默返回 0，备份永远不清理；改为 `prune_backups(self.backup_dir(), keep)`。
+- **P1 按时间回看异常分支自己会崩**：`message_engine` 用了未导入的 `logger`，任何解析/SQL 异常都变成
+  NameError，真实原因被覆盖、面板静默返回空；补 `logger` 导入。
+- **P1 身份归一/启动自愈静默半途而废**：归一撞 `idx_mem_idem` 唯一索引会让整批 UPDATE 中断，
+  `bootstrap` 又是 `except: pass`；改为逐条 `sqlite3.IntegrityError` 跳过 + `logger.warning`。
+- **P1 维护循环一小时才跑第一次**：热重载间隔小于 1 小时时日备份/周整理永远不执行；
+  改成启动 60 秒后先跑一次，之后每小时。
+- **P2**：质量门恢复可用——路由数改扫 `core/web_handlers.py`（以前恒 0）、pyflakes 扫全仓、
+  只卡未定义名；整理预演 `merged_summaries` 不再恒 0（预演也走同样的合并计算）；
+  `terminate` 关闭向量补全线程；删掉死文件 `store_util.py`；清理重复导入。
+- 测试 **344 项全过**；覆盖率 **87% → 88%**（底线 88%）；`tools/quality_gate.py --fast` 全绿。
+
 ## 3.2.0（2026-11-14）
 
 与 3.1.0 功能一致，重新打包同步发布；记忆与群聊分类能力保持不变。
