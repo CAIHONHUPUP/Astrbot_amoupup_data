@@ -3,9 +3,10 @@
 
 守护插件、陪伴插件、脚本只认这一层；内部一律转发 services，不写 SQL、不做打分。
 
-39 个方法（名称 / 位置参数 / 默认值 / 返回形状都不能变）：
+41 个方法（名称 / 位置参数 / 默认值 / 返回形状都不能变）：
     画像  get_profile / save_profile / list_profiles / delete_profile
     记忆  remember / recall / list_memories / delete_memory
+    夜间  nightly_memory_candidates / nightly_apply（守护插件 03:00 提炼用）
     关系  list_relations / save_relation / delete_relation
     缓存  cache_get / cache_set / cache_delete
     聊天  add_message / list_messages / delete_message / messages_since /
@@ -150,6 +151,66 @@ class MemoryAPI:
         except Exception as exc:
             logger.debug("[amo_data] 删除记忆失败: %s" % exc)
             return False
+
+    # ---------- 夜间提炼（守护插件「我能永远守护你」03:00 调） ----------
+    async def nightly_memory_candidates(self, hours: int = 24, limit: int = 300) -> list:
+        """近 N 小时写入的流水记忆（只读），SQL 在后台线程里跑。"""
+        try:
+            return await asyncio.to_thread(
+                self._p.memory.nightly_candidates, hours=hours, limit=limit
+            )
+        except Exception as exc:
+            logger.debug("[amo_data] 夜间记忆候选读取失败: %s" % exc)
+            return []
+
+    async def nightly_apply(self, meta: dict, facts: list, ids: list) -> dict:
+        """提炼出的事实写回长期记忆，并归档对应原流水；一条都没写进去就不归档。"""
+        info = meta or {}
+        bot_id = self._bot(info.get("bot_id"))
+        uid = str(info.get("uid") or "")
+        scope = str(info.get("scope") or "private")
+        group_id = str(info.get("group_id") or "")
+        subject = str(info.get("subject") or "user")
+        written = 0
+        absorbed = set()
+        for fact in (facts or []):
+            text = str(fact or "").strip()
+            if not text:
+                continue
+            try:
+                out = await asyncio.to_thread(
+                    self._p.memory.remember, bot_id, uid, text,
+                    kind="fact", importance=0.8, scope=scope,
+                    group_id=group_id, subject=subject,
+                )
+            except Exception as exc:
+                logger.debug("[amo_data] 夜间记忆写回失败: %s" % exc)
+                continue
+            if not isinstance(out, dict) or out.get("ok", True) is not False:
+                written += 1
+                # 提炼出的事实和某条流水几乎一样时会合并进那一行：
+                # 这行已经被改写成事实，就不能再跟着流水一起归档，否则事实也跟着消失。
+                try:
+                    merged_id = int(out.get("memory_id") or 0)
+                except (TypeError, ValueError, AttributeError):
+                    merged_id = 0
+                if merged_id > 0:
+                    absorbed.add(merged_id)
+        archived = 0
+        if written:
+            keep = []
+            for value in (ids or []):
+                try:
+                    number = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if number > 0 and number not in absorbed:
+                    keep.append(number)
+            try:
+                archived = await asyncio.to_thread(self._p.memory.nightly_archive, keep)
+            except Exception as exc:
+                logger.debug("[amo_data] 夜间记忆归档失败: %s" % exc)
+        return {"written": written, "archived": int(archived or 0)}
 
     # ---------- 关系（人物关系网） ----------
     async def list_relations(self, bot_id: str, uid: str = "") -> list:

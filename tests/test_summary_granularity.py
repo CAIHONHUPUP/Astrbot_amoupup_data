@@ -8,8 +8,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from store import DataStore  # noqa: E402
-from store_memory import _is_meta_query, _split_long_text  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
+from services.compression_engine import _split_long_text  # noqa: E402
+from services.retrieval_engine import _is_meta_query  # noqa: E402
 
 BOT = "bot1"
 UID = "302578963"

@@ -239,6 +239,31 @@ class MemoryDao:
             )
             self.conn.commit()
 
+    def recent_active(self, hours: int = 24, limit: int = 300) -> List[Dict[str, Any]]:
+        """近 N 小时内写入、仍然 active 的「流水记忆」（夜间提炼用）。
+
+        只读；按 created_at 正序返回，配合 services/memory_engine.nightly_candidates。
+        """
+        try:
+            span = max(1, int(hours))
+        except (TypeError, ValueError):
+            span = 24
+        try:
+            cap = int(limit)
+        except (TypeError, ValueError):
+            cap = 300
+        since = _now() - span * 3600
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, bot_id, uid, platform, scope, group_id, kind, subject, content, "
+                "importance, created_at FROM memories "
+                "WHERE COALESCE(status,'active')='active' AND created_at>=? "
+                "AND COALESCE(kind,'')!='pinned' "
+                "ORDER BY created_at ASC, id ASC LIMIT ?",
+                (int(since), max(1, min(cap, 1000))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def long_summaries(self, where: str, params: List[Any], cap: int,
                        limit: int) -> List[sqlite3.Row]:
         with self.lock:
@@ -274,10 +299,18 @@ class MemoryDao:
     def delete_by_keyword(self, bot_id: str, keyword: str) -> int:
         """物理删除包含关键词的记忆（管理员 /遗忘）。"""
         with self.lock:
+            # % 和 _ 是 LIKE 通配符；不转义的话 /遗忘 % 会清空整库
+            escaped = (str(keyword).replace("\\", "\\\\")
+                       .replace("%", "\\%").replace("_", "\\_"))
             cur = self.conn.execute(
-                "DELETE FROM memories WHERE bot_id=? AND content LIKE ?",
-                (str(bot_id), "%" + str(keyword) + "%"),
+                "DELETE FROM memories WHERE bot_id=? AND content LIKE ? ESCAPE '\\'",
+                (str(bot_id), "%" + escaped + "%"),
             )
+            try:
+                self.conn.execute(
+                    "DELETE FROM memory_vec WHERE memory_id NOT IN (SELECT id FROM memories)")
+            except Exception:
+                pass
             self.conn.commit()
             return int(cur.rowcount or 0)
 

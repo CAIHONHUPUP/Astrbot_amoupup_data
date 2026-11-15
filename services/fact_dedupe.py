@@ -28,6 +28,12 @@ _VERBS = ("最爱吃", "最爱喝", "不喜欢", "不爱吃", "不爱喝", "喜�
 _FILLERS = ("最近", "现在", "其实", "特别", "真的", "比较", "有点", "已经", "一直", "还是", "就")
 _NEG = re.compile(r"不(?:喜欢|爱|吃|喝)|戒了|不了|不再|改(?:喝|吃|成)|换成|没那么喜欢")
 _PUNCT = re.compile(r"[\[\]【】\s，,。.!！?？~～、；;：:]")
+#: 反转判定里不算「共同对象」的二元组：这些只是否定/喜好/换掉的说法本身
+_NEG_BIGRAMS = frozenset((
+    "我不", "不喜", "不爱", "不喝", "不吃", "不要", "不再", "不了",
+    "喜欢", "欢喝", "欢吃", "爱吃", "爱喝", "最爱", "讨厌",
+    "改喝", "改吃", "改成", "换成", "那么", "没有", "最近", "现在",
+))
 _MODIFIERS = ("加辣", "微辣", "中辣", "特辣", "辣的", "冰的", "热的",
               "大杯", "小杯", "少糖", "多糖", "半糖")
 _OBJ_FIRST = re.compile(r"^(?P<obj>[^，。！？]{2,12}?)(?:真|很|超|太|特别|挺)?(?:好吃|好喝|不错|香)$")
@@ -139,12 +145,23 @@ def merge_fact(old, new):
 
 
 def should_expire(old, new):
-    """新记忆是否把旧记忆的状态反转了（只标 expired，不删）。"""
+    """新记忆是否把旧记忆的状态反转了（只标 superseded，不删）。
+
+    2026-11-15 修：以前按「单字集合重叠 >= 2」判定，中文里「他/的/吃/了」几乎必然重叠，
+    一句「我不爱吃辣」会把同一个人最近 200 条里大批无关记忆一起标成 superseded，
+    等于静默丢记忆。现在要求二元组（相邻两字）真正重合，且占较短一句的 60% 以上。
+    """
     if fact_state(new) != "neg":
         return False
     old_key, new_key = fact_key(old), fact_key(new)
     if old_key and old_key == new_key:
         return True
-    a = set(_PUNCT.sub("", str(old or "")))
-    b = set(_PUNCT.sub("", str(new or "")))
-    return len(a & b) >= 2
+    old_body = _PUNCT.sub("", str(old or ""))
+    new_body = _PUNCT.sub("", str(new or ""))
+    if len(old_body) < 2 or len(new_body) < 2:
+        return False
+    a = {old_body[i:i + 2] for i in range(len(old_body) - 1)}
+    b = {new_body[i:i + 2] for i in range(len(new_body) - 1)}
+    # 只看「有信息的共同对象」：把「我不」「不喜」「改喝」这类否定/换掉的说法剔掉，
+    # 剩下还重合才说明两句在说同一个东西。
+    return bool((a & b) - _NEG_BIGRAMS)

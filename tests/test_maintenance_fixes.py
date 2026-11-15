@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services.backup_engine import BackupEngine  # noqa: E402
 from services.maintenance_engine import MaintenanceEngine  # noqa: E402
-from store import DataStore  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 BOT = "b"
 UID = "302578963"

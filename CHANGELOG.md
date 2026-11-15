@@ -1,3 +1,50 @@
+## 3.2.7（2026-11-15 周末功能汇总 + 结构重构）
+
+- 夜间提炼契约（3.2.2）：`nightly_memory_candidates` / `nightly_apply`，守护 03:00 不再空转；事实去重只认二元组，避免一句“不喜欢”成片归档。
+- API 快照 + 严格门禁（3.2.4）：41 个 MemoryAPI 方法签名钉死；静默 except / 异步阻塞门禁。
+- recall 拆分 + 版本双源（3.2.6）：264→41 行，五阶段方法；main.py 与 utils/config.py 版本一致性校验。
+- 结构重构（11-16）：本插件未改业务代码，随本轮打包为 3.2.7。
+
+## 3.2.6（2026-11-15 拆 retrieval_engine.recall + 版本号双源校验）
+
+- `RetrievalEngine.recall` **264 → 41 行**，五个阶段搬成独立方法（逐行搬移、评分公式一行未改）：
+  `_recall_prepare`（身份/范围/时间词/候选池 SQL）、`_recall_candidates`（子串粗筛 + 最近活跃 + 当日总结）、
+  `_recall_scores`（BM25/向量/语义闸）、`_recall_score`（逐条综合打分）、`_recall_diversify`（注入去重/多样化）。
+- **修版本号双源漂移**：`/status` 读的是 `utils/config.py` 的 `PLUGIN_VERSION`，它还停在 **3.2.1**
+  （main.py / metadata 早就是 3.2.4），面板因此报旧版本。现在：
+  - `tools/check_version.py` 同时校验 `main.py` 与 `utils/config.py`；
+  - 新增 `tests/test_version_sync.py` 钉死两个常量相等。
+- 实测：recall 相关 36 项全过；全量 **361 passed / 7 skipped / 39 subtests**；质量门全绿。
+
+## 3.2.4（2026-11-15 对外门面快照 + 严格门禁）
+
+- **MemoryAPI 快照测试** `tests/test_api_surface_snapshot.py`：把 `core/api.py` 的 MemoryAPI
+  方法名和参数钉成快照；删方法、改参数名直接红，并校验顶部「41 个方法」与实际数量一致。
+- 质量门加两道：静默 except 严格化（新文件必须 0 条，历史按文件预算）+ 异步阻塞门禁；
+  配套 `tests/test_quality_gate_policy.py` 反例自测。
+- 测试 **361 passed / 7 skipped / 39 subtests**；`tools/quality_gate.py --fast` 全绿。
+
+## 3.2.2（2026-11-15 补上夜间提炼契约：守护插件 03:00 不再空转）
+
+守护插件每天 03:00 会把过去 24h 的流水记忆交给大模型提炼成长期事实，但它调的
+`nightly_memory_candidates` / `nightly_apply` 两个方法**能记这边从来没有**，日志里天天是
+「记忆插件不可用，跳过」——整条链路一直空跑。
+
+- 新增 `MemoryAPI.nightly_memory_candidates(hours=24, limit=300)`：近 N 小时写入、仍然 active 的流水
+  （SQL 在后台线程跑，按 created_at 正序，跳过 pinned）。
+- 新增 `MemoryAPI.nightly_apply(meta, facts, ids)`：把提炼出的事实按原会话（scope/group_id/subject）
+  写回长期记忆，再归档对应流水。
+- **不丢事实**：提炼结果和某条流水几乎一样时会被合并进那一行，那一行**不归档**（否则事实跟着消失）；
+  一条都没写进去时也不归档。
+- 底层补 `MemoryDAO.recent_active` / `MemoryEngine.nightly_candidates` / `nightly_archive`
+  （归档只改 status，不物理删除）。
+- **P0 修「一句不喜欢就把无关记忆成片归档」**：`fact_dedupe.should_expire` 以前用「单字集合重叠 ≥ 2」判断状态反转，
+  中文里「他/的/吃/了」几乎必然重叠——一句「我不喜欢吃香菜」会把最近 200 条里大批无关记忆一起标成
+  superseded（召回只取 active，等于静默丢记忆）。现在只认**二元组且剔掉否定/换掉的说法本身**（我不/不喜/改喝…）
+  之后的共同对象：「我不喜欢吃辣」不会再带走「周末去了公园看花」；「不喜欢下雨天」也不会带走「不喜欢吃辣」；
+  真正的反转（「我喜欢喝冰美式」→「改喝热牛奶」）仍然生效。
+- 测试 `tests/test_nightly_memory_api.py` 6 项 + 事实去重 2 项；全量 **352 passed / 7 skipped / 39 subtests**。
+
 ## 3.2.1（2026-11-15 修复：保留策略真正执行 / 备份按份裁剪 / 身份归一不中断）
 
 - **P1 保留策略从未执行**：`maintenance.run_once` 用 `await` 调同步的 `retention()` →

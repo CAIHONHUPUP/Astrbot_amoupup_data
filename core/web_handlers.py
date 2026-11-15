@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from astrbot.api import logger
 
@@ -16,9 +16,9 @@ except ImportError:  # 顶层导入（测试）
     from core.web_request import web_request
 
 try:  # 顶层导入（测试）
-    from ..utils.config import PLUGIN_NAME, PLUGIN_VERSION
+    from ..utils.config import PLUGIN_VERSION
 except ImportError:
-    from utils.config import PLUGIN_NAME, PLUGIN_VERSION
+    from utils.config import PLUGIN_VERSION
 
 
 class WebHandlersMixin:
@@ -333,6 +333,8 @@ class WebHandlersMixin:
         if not name:
             return {"code": 1, "msg": "缺少备份文件名"}
         counts = await self.mem.restore_backup(name, payload.get("bot_id") or "")
+        if isinstance(counts, dict) and counts.get("error"):
+            return {"code": 1, "msg": "备份文件不存在或损坏"}
         return {"code": 0, "data": counts}
 
 
@@ -486,6 +488,9 @@ class WebHandlersMixin:
         umo = str(payload.get("umo") or "").strip()
         if str(payload.get("confirm") or "") not in ("1", "true", "yes"):
             return {"code": 1, "msg": "清空需要确认：confirm=1"}
+        # 缺 umo 时绝不能当成“清空全部”，那是不可恢复的整库删聊天
+        if not umo and str(payload.get("all") or "") not in ("1", "true", "yes"):
+            return {"code": 1, "msg": "必须指定 umo；清空全部请显式传 all=1"}
         return {"code": 0, "data": {"deleted": self.messages.clear_messages(bot_id, umo)}}
 
 

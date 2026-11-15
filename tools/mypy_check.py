@@ -2,12 +2,12 @@
 """在任意工作目录下跑 mypy：把插件目录当成一个包，相对导入才解得开。
 
 CI 里直接 `python -m mypy` 时，插件根目录就是仓库根，mypy 认不出它的包名，
-`from .store import DataStore` 会报 "No parent module"。这里把父目录放进
+`from .services.memory_engine import MemoryEngine` 会报 "No parent module"。这里把父目录放进
 MYPYPATH、按目录检查，任何 cwd 下都能跑。
 
 用法：
     python tools/mypy_check.py
-    python tools/mypy_check.py store.py store_memory.py
+    python tools/mypy_check.py services/memory_engine.py
 """
 from __future__ import annotations
 

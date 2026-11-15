@@ -11,7 +11,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from store import DataStore  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 BOT = "bot1"
 UID = "302578963"
@@ -69,6 +69,25 @@ class MemoryFactTests(unittest.TestCase):
         self.assertNotEqual(str(row["status"] or "active"), "active")
         active = [r for r in self._rows("%冰美式%") if str(r["status"] or "") == "active"]
         self.assertEqual(active, [])
+
+    def test_negation_keeps_unrelated_memories(self):
+        """一句「不喜欢X」不能把无关记忆成片标成 superseded（2026-11-15 修）。"""
+        keep = [self.store.remember(BOT, UID, text, kind="fact")["memory_id"]
+                for text in ("周末去了公园看花", "他姐下个月结婚", "睡觉前喜欢听雨声")]
+        self.store.remember(BOT, UID, "我不喜欢吃香菜", kind="fact")
+        rows = self.store.conn.execute(
+            "SELECT id, status FROM memories WHERE id IN (%s)" % ",".join("?" * len(keep)),
+            keep).fetchall()
+        for row in rows:
+            self.assertEqual(str(row["status"] or "active"), "active",
+                             "无关记忆被误标：%s" % dict(row))
+
+    def test_negation_shares_only_function_words(self):
+        """只重合「我不 / 不喜 / 喜欢」这种说法本身时不算反转。"""
+        old_id = self.store.remember(BOT, UID, "我不喜欢吃辣", kind="fact")["memory_id"]
+        self.store.remember(BOT, UID, "我不喜欢下雨天", kind="fact")
+        row = self.store.conn.execute("SELECT status FROM memories WHERE id=?", (old_id,)).fetchone()
+        self.assertEqual(str(row["status"] or "active"), "active")
 
     def test_compression_merges_same_fact(self):
         self._insert("老公喜欢吃螺蛳粉")

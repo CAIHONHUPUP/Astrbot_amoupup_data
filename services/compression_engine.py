@@ -14,11 +14,11 @@ from typing import Any, Dict, List
 try:
     from ..models.dao import MemoryDao
     from ..services import fact_dedupe
-    from ..utils.text_process import _bot_filter, _now, _recall_tokens, logger
+    from ..utils.text_process import _bot_filter, _now, _recall_tokens
 except ImportError:  # 顶层导入（测试/脚本）
     from models.dao import MemoryDao
     from services import fact_dedupe
-    from utils.text_process import _bot_filter, _now, _recall_tokens, logger
+    from utils.text_process import _bot_filter, _now, _recall_tokens
 
 # 句子边界：中文句号/问号/叹号/分号/换行；用 lookbehind 保留分隔符，拼回去还是原文
 _SENTENCE_RE = re.compile(r"(?<=[。！？!?；;\n])")

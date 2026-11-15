@@ -97,6 +97,41 @@ class RetrievalEngine:
         相关性 = BM25（单字+二元组）。配了 embedding 时再叠一层语义余弦。
         两道闸防止"什么都推一条"：关键词证据 + 语义证据（余弦>=阈值且领先）。
         """
+        ctx = self._recall_prepare(bot_id, uid, query, limit, scope, group_id, platform, pid,
+                                   half_life_days, importance_decay, pool_size)
+        rows = self._recall_candidates(ctx)
+        if not rows:
+            # 元问题没有实词，关键词粗筛一条都进不来
+            return self._meta_fallback(ctx["bot_id"], ctx["uid"], ctx["scope"], ctx["group_id"],
+                                       ctx["now"], ctx["half_life_days"],
+                                       ctx["importance_decay"]) if ctx["meta_query"] else []
+
+        sp = self._recall_scores(ctx, rows)
+        scored = self._recall_score(ctx, rows, sp)
+        items = self._recall_diversify(ctx, scored, rows, sp["docs"])
+
+        if not items and ctx["meta_query"]:
+            items = self._meta_fallback(ctx["bot_id"], ctx["uid"], ctx["scope"], ctx["group_id"],
+                                        ctx["now"], ctx["half_life_days"],
+                                        ctx["importance_decay"])
+        if items:
+            with self.lock:
+                self.conn.executemany(
+                    "UPDATE memories SET hit_count=hit_count+1, last_hit_at=? WHERE id=?",
+                    [(ctx["now"], item["id"]) for item in items],
+                )
+                self.conn.commit()
+        if self.setting("identity_debug", True):
+            logger.info(
+                "[MEMORY_DEBUG] person_id=%s source_platform=%s hit=%s reason=recall:%s",
+                ctx["pid"], ctx["platform"] or "unknown", len(items),
+                "meta" if ctx["meta_query"] else "query",
+            )
+        return items
+
+    def _recall_prepare(self, bot_id, uid, query, limit, scope, group_id, platform, pid,
+                         half_life_days, importance_decay, pool_size):
+        """recall 第一步：解析身份/范围/时间词/候选池 SQL（原 recall 前 59 行）。"""
         bot_id, uid = str(bot_id), str(uid)
         try:
             if not pid:
@@ -156,7 +191,19 @@ class RetrievalEngine:
         if group_id:
             base += " AND group_id=?"
             params.append(str(group_id))
+        return {
+            "bot_id": bot_id, "uid": uid, "pid": pid, "limit": limit, "text": text,
+            "meta_query": meta_query, "now": now, "half_life_days": half_life_days,
+            "importance_decay": importance_decay, "pool_size": pool_size, "span": span,
+            "scope": scope, "group_id": group_id, "platform": platform,
+            "base": base, "params": params,
+        }
 
+    def _recall_candidates(self, ctx):
+        """recall 第二步：子串粗筛 + 最近活跃补充 + 时间词对应日总结。"""
+        base, params = ctx["base"], ctx["params"]
+        text, pool_size = ctx["text"], ctx["pool_size"]
+        limit, span = ctx["limit"], ctx["span"]
         rows: List[sqlite3.Row] = []
         # 粗筛 1：子串命中（>=3 字走 trigram，否则 LIKE）
         if text:
@@ -190,11 +237,11 @@ class RetrievalEngine:
                 rows.extend([r for r in digests if int(r["id"]) not in seen])
             except Exception:
                 pass
-        if not rows:
-            # 元问题没有实词，关键词粗筛一条都进不来
-            return self._meta_fallback(bot_id, uid, scope, group_id, now,
-                                       half_life_days, importance_decay) if meta_query else []
+        return rows
 
+    def _recall_scores(self, ctx, rows):
+        """recall 第三步：BM25 / 向量 / 语义闸这些打基础分要用的量。"""
+        text = ctx["text"]
         contents = [str(r["content"] or "") for r in rows]
         q_tokens = _recall_tokens(text) if text else []
         docs = [_recall_tokens(c) for c in contents]
@@ -227,7 +274,24 @@ class RetrievalEngine:
             margin = best_cos - second
             # bge-m3 中文余弦偏平（无关也能到 0.7+），门槛 0.82 且 top 要领先
             vec_pass = best_cos >= max(vec_min_cos, 0.82) and margin >= vec_min_margin
+        return {
+            "contents": contents, "q_tokens": q_tokens, "docs": docs, "raw": raw,
+            "q_vec": q_vec, "vec_map": vec_map, "vec_weight": vec_weight,
+            "vec_min_cos": vec_min_cos, "vec_min_margin": vec_min_margin,
+            "min_terms": min_terms, "infos": infos, "qchars": qchars,
+            "coss": coss, "best_cos": best_cos, "vec_pass": vec_pass,
+        }
 
+    def _recall_score(self, ctx, rows, sp):
+        """recall 第四步：逐条综合打分（相关 + 重要 + 新鲜 + 命中次数）。"""
+        text, span = ctx["text"], ctx["span"]
+        now, half_life_days = ctx["now"], ctx["half_life_days"]
+        importance_decay = ctx["importance_decay"]
+        docs, raw = sp["docs"], sp["raw"]
+        infos, qchars = sp["infos"], sp["qchars"]
+        q_vec, coss = sp["q_vec"], sp["coss"]
+        best_cos, vec_pass = sp["best_cos"], sp["vec_pass"]
+        vec_weight, min_terms = sp["vec_weight"], sp["min_terms"]
         scored: List[Dict[str, Any]] = []
         top_rel = max(raw) if raw else 0.0
         info_count = len(infos) or 1
@@ -309,6 +373,12 @@ class RetrievalEngine:
             scored.append(item)
 
         scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    def _recall_diversify(self, ctx, scored, rows, docs):
+        """recall 第五步：注入去重 / 多样化（同一件事只留最相关那条）。"""
+        limit = ctx["limit"]
+        div_ratio = float(self.setting("diversify_ratio", 0.75) or 0.0)
         # 注入去重/多样化：同一件事只留最相关的一条
         tokens_by_id = {int(row["id"]): set(docs[idx]) for idx, row in enumerate(rows)}
         div_ratio = float(self.setting("diversify_ratio", 0.75) or 0.0)
@@ -334,23 +404,8 @@ class RetrievalEngine:
             selected_tokens.append(toks)
             if fkey:
                 selected_facts.add(fkey)
-
-        if not items and meta_query:
-            items = self._meta_fallback(bot_id, uid, scope, group_id, now,
-                                        half_life_days, importance_decay)
-        if items:
-            with self.lock:
-                self.conn.executemany(
-                    "UPDATE memories SET hit_count=hit_count+1, last_hit_at=? WHERE id=?",
-                    [(now, item["id"]) for item in items],
-                )
-                self.conn.commit()
-        if self.setting("identity_debug", True):
-            logger.info(
-                "[MEMORY_DEBUG] person_id=%s source_platform=%s hit=%s reason=recall:%s",
-                pid, platform or "unknown", len(items), "meta" if meta_query else "query",
-            )
         return items
+
 
     def _count_active(self, bot_id: str, uid: str, pid: int) -> int:
         try:

@@ -48,8 +48,8 @@ def readme_version():
     return match.group(1) if match else ""
 
 
-def code_version():
-    text = read("main.py")
+def code_version(name="main.py"):
+    text = read(name)
     match = re.search(r'PLUGIN_VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', text)
     return match.group(1) if match else ""
 
@@ -91,6 +91,7 @@ def main():
         "CHANGELOG.md": changelog_version(),
         "README.md": readme_version(),
         "main.py": code_version(),
+        "utils/config.py": code_version("utils/config.py"),
     }
     missing = [name for name, value in versions.items() if not value]
     if missing:

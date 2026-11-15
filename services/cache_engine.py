@@ -10,9 +10,9 @@ import json
 from typing import Any, List
 
 try:
-    from ..utils.text_process import _bot_filter, _now, logger
+    from ..utils.text_process import _bot_filter, _now
 except ImportError:  # 顶层导入（测试/脚本）
-    from utils.text_process import _bot_filter, _now, logger
+    from utils.text_process import _bot_filter, _now
 
 
 class CacheEngine:

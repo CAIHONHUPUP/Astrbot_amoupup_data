@@ -231,7 +231,8 @@ class PersonEngine:
             ).fetchone()
             if not exists or int(exists["c"] or 0) < 2:
                 return False
-            for table, column in (("person_links", "pid"), ("messages", "pid")):
+            for table, column in (("person_links", "pid"), ("messages", "pid"),
+                                  ("memories", "pid")):
                 try:
                     self.conn.execute(
                         "UPDATE %s SET %s=? WHERE bot_id=? AND %s=?" % (table, column, column),

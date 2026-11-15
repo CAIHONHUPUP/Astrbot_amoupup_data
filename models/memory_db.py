@@ -38,64 +38,8 @@ DEFAULT_DB_SETTINGS: Dict[str, Any] = {
 }
 
 
-class MemoryDB:
-    """一个连接 + 一把 RLock + 全部结构迁移。
 
-    上层（services/*）通过 db.conn / db.lock 做读写；不要在别处再开连接，
-    否则 WAL 下的写锁会互相打架。
-    """
-
-    def __init__(self, db_path: str, settings: Optional[Dict[str, Any]] = None):
-        self.path = str(db_path)
-        self.lock = threading.RLock()
-        self._conn: Optional[sqlite3.Connection] = None
-        self.settings: Dict[str, Any] = dict(DEFAULT_DB_SETTINGS)
-        if settings:
-            self.settings.update({k: v for k, v in settings.items() if v is not None})
-        self.fts_trigram = False
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        self._open()
-        self._init_schema()
-        self._migrate_columns()
-        self._init_trigram_fts()
-
-    # ---------- 连接 ----------
-    def setting(self, key: str, default: Any = None) -> Any:
-        return self.settings.get(key, DEFAULT_DB_SETTINGS.get(key, default))
-
-    def _open(self) -> None:
-        with self.lock:
-            self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=15)
-            self._conn.row_factory = sqlite3.Row
-            try:
-                self._conn.execute("PRAGMA journal_mode=WAL")
-            except Exception:
-                pass
-
-    @property
-    def conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            with self.lock:
-                if self._conn is None:
-                    self._open()
-        assert self._conn is not None
-        return self._conn
-
-    def close(self) -> None:
-        with self.lock:
-            if self._conn is not None:
-                try:
-                    self._conn.close()
-                except Exception:
-                    pass
-                self._conn = None
-
-    # ---------- 结构 ----------
-    def _init_schema(self) -> None:
-        with self.lock:
-            conn = self.conn
-            conn.executescript(
-                """
+SCHEMA_SQL = """
                 CREATE TABLE IF NOT EXISTS profiles (
                     bot_id TEXT NOT NULL,
                     uid TEXT NOT NULL,
@@ -231,36 +175,104 @@ class MemoryDB:
                 CREATE TABLE IF NOT EXISTS store_meta(
                     key TEXT PRIMARY KEY, value TEXT DEFAULT ''
                 );
-                """
-            )
-            conn.commit()
-            # 2026-11-14：旧版 mem_au 直接 UPDATE 外部内容 FTS，特定中文会报
-            # "database disk image is malformed"；改成 FTS5 标准的 delete+insert，
-            # 并重建一次索引修复老库里可能已损坏的 FTS 数据。
-            try:
-                with self.lock:
-                    conn = self.conn
-                    conn.executescript(
-                        """
+"""
+
+FTS_TRIGGER_SQL = """
                         DROP TRIGGER IF EXISTS mem_au;
                         CREATE TRIGGER mem_au AFTER UPDATE OF content ON memories BEGIN
                             INSERT INTO memories_fts(memories_fts, rowid, content)
                                 VALUES('delete', old.id, old.content);
                             INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
                         END;
-                        """
-                    )
-                    marker = conn.execute(
-                        "SELECT value FROM store_meta WHERE key='fts_rebuild_v2'"
-                    ).fetchone()
-                    if not marker:
-                        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
-                        conn.execute(
-                            "INSERT OR REPLACE INTO store_meta(key, value) VALUES('fts_rebuild_v2', '1')"
-                        )
-                    conn.commit()
+"""
+
+class MemoryDB:
+    """一个连接 + 一把 RLock + 全部结构迁移。
+
+    上层（services/*）通过 db.conn / db.lock 做读写；不要在别处再开连接，
+    否则 WAL 下的写锁会互相打架。
+    """
+
+    def __init__(self, db_path: str, settings: Optional[Dict[str, Any]] = None):
+        self.path = str(db_path)
+        self.lock = threading.RLock()
+        self._conn: Optional[sqlite3.Connection] = None
+        self.settings: Dict[str, Any] = dict(DEFAULT_DB_SETTINGS)
+        if settings:
+            self.settings.update({k: v for k, v in settings.items() if v is not None})
+        self.fts_trigram = False
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        self._open()
+        self._init_schema()
+        self._migrate_columns()
+        self._init_trigram_fts()
+
+    # ---------- 连接 ----------
+    def setting(self, key: str, default: Any = None) -> Any:
+        return self.settings.get(key, DEFAULT_DB_SETTINGS.get(key, default))
+
+    def _open(self) -> None:
+        with self.lock:
+            self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=15)
+            self._conn.row_factory = sqlite3.Row
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL")
             except Exception:
                 pass
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            with self.lock:
+                if self._conn is None:
+                    self._open()
+        assert self._conn is not None
+        return self._conn
+
+    def close(self) -> None:
+        with self.lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+
+    # ---------- 结构 ----------
+    def _init_schema(self) -> None:
+        with self.lock:
+            conn = self.conn
+            conn.executescript(SCHEMA_SQL)
+            conn.commit()
+        self._repair_fts_trigger()
+
+    def _repair_fts_trigger(self) -> None:
+        """重建 FTS 更新触发器并修复老库索引（2026-11-14 malformed 那个修复）。"""
+        try:
+            with self.lock:
+                conn = self.conn
+                conn.executescript(
+                    """
+                    DROP TRIGGER IF EXISTS mem_au;
+                    CREATE TRIGGER mem_au AFTER UPDATE OF content ON memories BEGIN
+                        INSERT INTO memories_fts(memories_fts, rowid, content)
+                            VALUES('delete', old.id, old.content);
+                        INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    """
+                )
+                marker = conn.execute(
+                    "SELECT value FROM store_meta WHERE key='fts_rebuild_v2'"
+                ).fetchone()
+                if not marker:
+                    conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                    conn.execute(
+                        "INSERT OR REPLACE INTO store_meta(key, value) VALUES('fts_rebuild_v2', '1')"
+                    )
+                conn.commit()
+        except Exception:
+            pass
+
 
     def _init_trigram_fts(self) -> None:
         """建 trigram FTS5 表做子串粗筛；SQLite 不支持时自动停用。

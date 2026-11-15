@@ -919,6 +919,19 @@ async function openProfile(uid) {
   }
 }
 
+function memoryKindLabel(kind) {
+  // 面板不显示底层枚举和置信度：翻译成人话（"收入 · 固定工资"）
+  const raw = String(kind || "").toLowerCase();
+  if (raw.indexOf("finance_permanent_income") === 0) return "收入 · 固定工资";
+  if (raw.indexOf("finance_permanent") === 0) return "重要记忆";
+  if (raw.indexOf("finance_long") === 0) return "长期记忆";
+  if (raw.indexOf("finance_short") === 0) return "近期记忆";
+  if (raw.indexOf("finance_news") === 0) return "小事";
+  if (raw.indexOf("finance") === 0) return "钱财相关";
+  if (raw === "manual") return "手动添加";
+  return "记忆";
+}
+
 function memoryLine(item) {
   const row = document.createElement("div");
   row.className = "mem";
@@ -928,7 +941,7 @@ function memoryLine(item) {
   txt.textContent = item.content;
   const meta = document.createElement("div");
   meta.className = "sub";
-  meta.textContent = (item.kind || "fact") + " · " + Number(item.importance || 0).toFixed(2);
+  meta.textContent = memoryKindLabel(item.kind);
   const del = document.createElement("button");
   del.className = "ghost";
   del.textContent = "删";

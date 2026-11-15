@@ -14,7 +14,7 @@ def read(name):
 
 class LoggingRuleTests(unittest.TestCase):
     def test_store_does_not_fallback_to_builtin_logging(self):
-        names = ["store.py", "models/memory_db.py", "core/api.py"]
+        names = ["models/memory_db.py", "core/api.py"]
         names += [p.replace(ROOT + os.sep, "").replace("\\", "/")
                   for p in glob.glob(os.path.join(ROOT, "services", "*.py"))]
         for name in names:

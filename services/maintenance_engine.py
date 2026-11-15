@@ -10,9 +10,9 @@ import asyncio
 from typing import Any, Dict
 
 try:
-    from ..utils.text_process import _bot_filter, _now, logger
+    from ..utils.text_process import _bot_filter, logger
 except ImportError:  # 顶层导入（测试/脚本）
-    from utils.text_process import _bot_filter, _now, logger
+    from utils.text_process import _bot_filter, logger
 
 
 class MaintenanceEngine:

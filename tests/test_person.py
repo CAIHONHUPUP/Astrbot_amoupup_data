@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from store import DataStore, platform_label, platform_of_umo  # noqa: E402
+from support.store_fixture import DataStore, platform_label, platform_of_umo  # noqa: E402
 
 
 class PersonTests(unittest.TestCase):

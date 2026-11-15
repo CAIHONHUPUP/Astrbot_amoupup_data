@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import clock  # noqa: E402
+from utils import clock  # noqa: E402
 
 
 @unittest.skipUnless(hasattr(time, "tzset"), "Windows 没有 tzset，进程级时区改不了")
@@ -78,7 +78,7 @@ class ClockTests(unittest.TestCase):
 
 class SourceGuardTests(unittest.TestCase):
     def test_no_bare_localtime_or_now(self):
-        names = ["store.py", "main.py", "utils/time_query.py", "utils/text_process.py",
+        names = ["main.py", "utils/time_query.py", "utils/text_process.py",
                  "models/memory_db.py", "services/person_engine.py",
                  "services/memory_engine.py", "services/message_engine.py"]
         for name in names:

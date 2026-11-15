@@ -29,7 +29,7 @@ astrbot_stub.install()
 
 import main as main_module  # noqa: E402
 from main import AmoDataPlugin, MemoryAPI  # noqa: E402
-from store import DataStore  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 BOT = "test-bot"
 UID = "302578963"
@@ -499,8 +499,8 @@ class PluginApiCase(unittest.TestCase):
         self.assertNotIn("error", restored["data"])
         missing_file = self.run_api(self.plugin.api_backup_restore,
                                     {"name": "a_file_that_does_not_exist.db"})
-        self.assertEqual(missing_file["code"], 0)
-        self.assertEqual(missing_file["data"], {"error": 1})
+        self.assertEqual(missing_file["code"], 1)
+        self.assertIn("不存在", missing_file["msg"])
 
         async def empty_backup(keep=7):
             return ""
@@ -591,9 +591,32 @@ class PluginApiCase(unittest.TestCase):
         no_confirm = self.run_api(self.plugin.api_message_clear, {})
         self.assertEqual(no_confirm["code"], 1)
         self.assertIn("confirm", no_confirm["msg"])
-        cleared = self.run_api(self.plugin.api_message_clear, {"confirm": "yes"})
+        no_umo = self.run_api(self.plugin.api_message_clear, {"confirm": "yes"})
+        self.assertEqual(no_umo["code"], 1)
+        self.assertIn("umo", no_umo["msg"])
+        cleared = self.run_api(self.plugin.api_message_clear,
+                               {"confirm": "yes", "umo": "qq:1"})
         self.assertEqual(cleared["code"], 0)
         self.assertEqual(cleared["data"]["deleted"], 1)
+
+    # ---------- 审计回归：破坏性接口的参数边界 ----------
+    def test_profile_delete_does_not_touch_other_pid0_memories(self) -> None:
+        self.plugin.store.save_profile(BOT, "alice", name="Alice")
+        self.plugin.store.save_profile(BOT, "bob", name="Bob")
+        self.plugin.store.remember(BOT, "alice", "alice 的记忆")
+        self.plugin.store.remember(BOT, "bob", "bob 的记忆")
+        out = self.run_api(self.plugin.api_profile_delete,
+                           {"uid": "alice", "confirm": "1"})
+        self.assertEqual(out["code"], 0)
+        left = asyncio.run(self.plugin.mem.list_memories(BOT, "bob"))
+        self.assertTrue(any("bob 的记忆" in row.get("content", "") for row in left))
+
+    def test_forget_wildcard_is_literal(self) -> None:
+        self.plugin.store.remember(BOT, UID, "普通记忆一")
+        self.plugin.store.remember(BOT, UID, "普通记忆二")
+        self.assertEqual(self.plugin.memory.forget(BOT, "%"), 0)
+        rows = asyncio.run(self.plugin.mem.list_memories(BOT, UID))
+        self.assertGreaterEqual(len(rows), 2)
 
     # ---------- 日志 ----------
     def test_log_endpoints(self) -> None:

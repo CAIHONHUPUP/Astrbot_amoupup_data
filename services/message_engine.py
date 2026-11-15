@@ -231,12 +231,20 @@ class MessageEngine:
         识别不了返回 (0, 0)；调用方据此返回空列表，避免「标签写上周三、
         内容却是今天的」这种更糟的错配。
         """
-        from datetime import datetime as _dt, timedelta as _td
         text = str(query or "")
         now = _clock.now()
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        for handler in (cls._tw_relative_day, cls._tw_weekday, cls._tw_month_day,
+                        cls._tw_day_num, cls._tw_absolute, cls._tw_recent):
+            result = handler(text, today, now)
+            if result is not None:
+                return result
+        return 0, 0
+
+    @classmethod
+    def _tw_relative_day(cls, text, today, now):
+        from datetime import timedelta as _td
         day = None
-        target: Optional[_dt] = None
         if "大前天" in text:
             day = today - _td(days=3)
         elif "前天" in text:
@@ -245,88 +253,101 @@ class MessageEngine:
             day = today - _td(days=1)
         elif "今天" in text or "今晚" in text:
             day = today
-        if day is not None:
-            start, end = cls._day_window(day, text)
-            return cls._epoch(start), cls._epoch(end)
+        if day is None:
+            return None
+        start, end = cls._day_window(day, text)
+        return cls._epoch(start), cls._epoch(end)
 
-        # 上周三 / 这周五 / 礼拜天
+    @classmethod
+    def _tw_weekday(cls, text, today, now):
+        from datetime import timedelta as _td
         m = re.search(r"(上上|上|这|本)?\s*(周|星期|礼拜)\s*([一二三四五六日天1-7])", text)
-        if m:
-            raw = m.group(3)
-            # 周日/周天/礼拜天：_cn_int 只认数字和「一二三…」，这里补上「日/天 = 7」
-            idx = (7 if raw in ("日", "天") else cls._cn_int(raw)) - 1  # 周一=0
-            if 0 <= idx <= 6:
-                monday = today - _td(days=today.weekday())
-                target = monday + _td(days=idx)
-                if m.group(1) == "上":
-                    target -= _td(days=7)
-                elif m.group(1) == "上上":
-                    target -= _td(days=14)
-                elif target > today:
-                    target -= _td(days=7)
-                start, end = cls._day_window(target, text)
-                return cls._epoch(start), cls._epoch(end)
+        if not m:
+            return None
+        raw = m.group(3)
+        idx = (7 if raw in ("日", "天") else cls._cn_int(raw)) - 1
+        if not (0 <= idx <= 6):
+            return None
+        monday = today - _td(days=today.weekday())
+        target = monday + _td(days=idx)
+        if m.group(1) == "上":
+            target -= _td(days=7)
+        elif m.group(1) == "上上":
+            target -= _td(days=14)
+        elif target > today:
+            target -= _td(days=7)
+        start, end = cls._day_window(target, text)
+        return cls._epoch(start), cls._epoch(end)
 
-        # 11月6号 / 11月6号晚上
+    @classmethod
+    def _tw_month_day(cls, text, today, now):
+        from datetime import datetime as _dt
         m = re.search(r"(?:(\d{4})\s*年)?\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*月"
                       r"\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*[号日]?", text)
-        if m:
-            year = int(m.group(1)) if m.group(1) else today.year
-            month = cls._cn_int(m.group(2)) or 1
-            day_num = cls._cn_int(m.group(3)) or 1
+        if not m:
+            return None
+        year = int(m.group(1)) if m.group(1) else today.year
+        month = cls._cn_int(m.group(2)) or 1
+        day_num = cls._cn_int(m.group(3)) or 1
+        try:
+            target = _dt(year, month, day_num)
+        except ValueError:
+            return None
+        if not m.group(1) and target > today:
             try:
-                target = _dt(year, month, day_num)
+                target = _dt(year - 1, month, day_num)
             except ValueError:
-                target = None
-            if target is not None:
-                if not m.group(1) and target > today:
-                    try:
-                        target = _dt(year - 1, month, day_num)
-                    except ValueError:
-                        target = None
-            if target is not None:
-                start, end = cls._day_window(target, text)
-                return cls._epoch(start), cls._epoch(end)
+                return None
+        start, end = cls._day_window(target, text)
+        return cls._epoch(start), cls._epoch(end)
 
-        # 六号 / 6号（没写月份：本月还没到就算上个月）
+    @classmethod
+    def _tw_day_num(cls, text, today, now):
+        from datetime import timedelta as _td
         m = re.search(r"(?<!\d)(\d{1,2}|[一二三四五六七八九十]{1,3})\s*[号日]", text)
-        if m:
-            day_num = cls._cn_int(m.group(1))
-            if 1 <= day_num <= 31:
-                try:
-                    target = today.replace(day=day_num)
-                except ValueError:
-                    target = None
-                if target is not None and target > today:
-                    prev_month_end = today.replace(day=1) - _td(days=1)
-                    try:
-                        target = prev_month_end.replace(day=day_num)
-                    except ValueError:
-                        target = None
-                if target is not None:
-                    start, end = cls._day_window(target, text)
-                    return cls._epoch(start), cls._epoch(end)
+        if not m:
+            return None
+        day_num = cls._cn_int(m.group(1))
+        if not (1 <= day_num <= 31):
+            return None
+        try:
+            target = today.replace(day=day_num)
+        except ValueError:
+            return None
+        if target > today:
+            prev_month_end = today.replace(day=1) - _td(days=1)
+            try:
+                target = prev_month_end.replace(day=day_num)
+            except ValueError:
+                return None
+        start, end = cls._day_window(target, text)
+        return cls._epoch(start), cls._epoch(end)
 
+    @classmethod
+    def _tw_absolute(cls, text, today, now):
+        from datetime import datetime as _dt, timedelta as _td
         if "上个月" in text or "上月" in text:
             first = today.replace(day=1)
             start = (first - _td(days=1)).replace(day=1)
             return cls._epoch(start), cls._epoch(first)
         if "去年" in text:
-            start = _dt(today.year - 1, 1, 1)
-            end = _dt(today.year, 1, 1)
-            return cls._epoch(start), cls._epoch(end)
+            return cls._epoch(_dt(today.year - 1, 1, 1)), cls._epoch(_dt(today.year, 1, 1))
         if "今年" in text:
             return cls._epoch(_dt(today.year, 1, 1)), cls._epoch(now + _td(seconds=1))
+        return None
 
+    @classmethod
+    def _tw_recent(cls, text, today, now):
+        from datetime import timedelta as _td
         m = re.search(r"最近\s*(\d+)\s*(天|日|小时|分钟)", text)
-        if m:
-            amount = max(1, int(m.group(1)))
-            if m.group(2) in ("小时", "分钟"):
-                unit = _td(hours=1) if m.group(2) == "小时" else _td(minutes=1)
-                return cls._epoch(now - unit * amount), cls._epoch(now + _td(seconds=1))
-            start = today - _td(days=amount - 1)
-            return cls._epoch(start), cls._epoch(today + _td(days=1))
-        return 0, 0
+        if not m:
+            return None
+        amount = max(1, int(m.group(1)))
+        if m.group(2) in ("小时", "分钟"):
+            unit = _td(hours=1) if m.group(2) == "小时" else _td(minutes=1)
+            return cls._epoch(now - unit * amount), cls._epoch(now + _td(seconds=1))
+        start = today - _td(days=amount - 1)
+        return cls._epoch(start), cls._epoch(today + _td(days=1))
 
 
     @classmethod

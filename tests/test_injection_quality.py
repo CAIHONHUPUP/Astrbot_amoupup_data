@@ -8,8 +8,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from store import DataStore  # noqa: E402
-import clock as amo_clock  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
+from utils import clock as amo_clock  # noqa: E402
 
 BOT = "b"
 UID = "u"

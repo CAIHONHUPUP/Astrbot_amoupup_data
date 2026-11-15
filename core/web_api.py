@@ -3,11 +3,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
-from typing import Any, Dict, Optional
-
 from astrbot.api import logger
 
 try:  # 包模式
@@ -16,9 +11,9 @@ except ImportError:  # 顶层导入（测试）
     from core.web_request import web_request
 
 try:  # 顶层导入（测试）
-    from ..utils.config import PLUGIN_NAME, PLUGIN_VERSION
+    from ..utils.config import PLUGIN_NAME
 except ImportError:
-    from utils.config import PLUGIN_NAME, PLUGIN_VERSION
+    from utils.config import PLUGIN_NAME
 
 
 try:

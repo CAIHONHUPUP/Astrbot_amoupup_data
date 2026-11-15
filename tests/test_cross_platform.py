@@ -8,8 +8,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import store as store_mod  # noqa: E402
-from store import DataStore, normalize_platform  # noqa: E402
+import support.store_fixture as store_mod  # noqa: E402
+from support.store_fixture import DataStore, normalize_platform  # noqa: E402
 
 BOT = "bot1"
 QQ_UID = "302578963"

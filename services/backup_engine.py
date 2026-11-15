@@ -82,102 +82,11 @@ class BackupEngine:
         counts = {"memories": 0, "profiles": 0, "relations": 0, "links": 0,
                   "aliases": 0, "skipped": 0, "failed": 0}
         default_bot = str(data.get("bot_id") or "") or ""
-        p = self.plugin
-        for item in data.get("memories") or []:
-            try:
-                bot = str(item.get("bot_id") or default_bot)
-                uid = str(item.get("uid") or "")
-                content = str(item.get("content") or "")
-                if not bot or not uid or not content:
-                    continue
-                res = (getattr(p, "remember", None) or p.memory.remember)(
-                    bot, uid, content,
-                    kind=str(item.get("kind") or "fact"),
-                    importance=item.get("importance", 0.5),
-                    scope=str(item.get("scope") or "private"),
-                    group_id=str(item.get("group_id") or ""),
-                    idem_key=str(item.get("idem_key") or ""),
-                    created_at=item.get("created_at"),
-                    last_hit_at=item.get("last_hit_at"),
-                    hit_count=item.get("hit_count", 0),
-                    keep_existing_content=True,
-                )
-                if not res.get("ok"):
-                    continue
-                if res.get("duplicate"):
-                    # 已经存在（内容指纹相同）就跳过，重复导入不会算成新增
-                    counts["skipped"] += 1
-                    continue
-                counts["memories"] += 1
-                mid = int(res.get("memory_id") or 0)
-                status = str(item.get("status") or "")
-                if mid and status in ("superseded", "archived", "merged"):
-                    with self.lock:
-                        self.conn.execute(
-                            "UPDATE memories SET status=?, superseded_by=? WHERE id=?",
-                            (status, int(item.get("superseded_by") or 0), mid),
-                        )
-                        self.conn.commit()
-            except Exception as exc:
-                # 以前这里静默 continue：二次导入时 74 条无声消失、计数还显示成功
-                counts["failed"] += 1
-                try:
-                    logger.warning("[amo_data] 导入记忆失败: %s" % exc)
-                except Exception:
-                    pass
-                continue
-        for item in data.get("profiles") or []:
-            try:
-                bot = str(item.get("bot_id") or default_bot)
-                uid = str(item.get("uid") or "")
-                if not bot or not uid:
-                    continue
-                current = p.profiles.get_profile(bot, uid)
-                try:
-                    remote_at = int(item.get("updated_at") or 0)
-                except (TypeError, ValueError):
-                    remote_at = 0
-                if current and remote_at and remote_at < int(current.get("updated_at") or 0):
-                    continue
-                (getattr(p, "save_profile", None) or p.profiles.save_profile)(
-                    bot, uid,
-                    name=item.get("name"), alias=item.get("alias"),
-                    relation=item.get("relation"), remark=item.get("remark"),
-                )
-                counts["profiles"] += 1
-            except Exception:
-                continue
-        for item in data.get("relations") or []:
-            try:
-                if (getattr(p, "save_relation", None) or p.persons.save_relation)(
-                    str(item.get("bot_id") or default_bot),
-                    str(item.get("a_uid") or ""), str(item.get("b_uid") or ""),
-                    str(item.get("relation") or "朋友"), str(item.get("note") or ""),
-                ):
-                    counts["relations"] += 1
-            except Exception:
-                continue
-        for item in data.get("person_links") or []:
-            try:
-                bot = str(item.get("bot_id") or default_bot)
-                platform, uid = str(item.get("platform") or ""), str(item.get("uid") or "")
-                if not bot or not uid:
-                    continue
-                (getattr(p, "resolve_person", None) or p.persons.resolve_person)(
-                    bot, platform, uid, str(item.get("name") or ""))
-                counts["links"] += 1
-            except Exception:
-                continue
-        for item in data.get("identity_alias") or []:
-            try:
-                if (getattr(p, "set_identity_alias", None) or p.persons.set_identity_alias)(
-                    str(item.get("bot_id") or default_bot),
-                    str(item.get("platform") or ""), str(item.get("uid") or ""),
-                    str(item.get("alias_platform") or ""), str(item.get("alias_uid") or ""),
-                ):
-                    counts["aliases"] += 1
-            except Exception:
-                continue
+        _import_memories(self, data, default_bot, counts)
+        _import_profiles(self, data, default_bot, counts)
+        _import_relations(self, data, default_bot, counts)
+        _import_links(self, data, default_bot, counts)
+        _import_aliases(self, data, default_bot, counts)
         return counts
 
     # ---------- 整库备份 ----------
@@ -286,3 +195,117 @@ class BackupEngine:
 def _now_str() -> str:
     import time
     return time.strftime("%Y%m%d-%H%M%S", time.localtime())
+
+def _import_memories(engine, data, default_bot, counts):
+    p = engine.plugin
+    for item in data.get("memories") or []:
+        try:
+            bot = str(item.get("bot_id") or default_bot)
+            uid = str(item.get("uid") or "")
+            content = str(item.get("content") or "")
+            if not bot or not uid or not content:
+                continue
+            res = (getattr(p, "remember", None) or p.memory.remember)(
+                bot, uid, content,
+                kind=str(item.get("kind") or "fact"),
+                importance=item.get("importance", 0.5),
+                scope=str(item.get("scope") or "private"),
+                group_id=str(item.get("group_id") or ""),
+                idem_key=str(item.get("idem_key") or ""),
+                created_at=item.get("created_at"),
+                last_hit_at=item.get("last_hit_at"),
+                hit_count=item.get("hit_count", 0),
+                keep_existing_content=True,
+            )
+            if not res.get("ok"):
+                continue
+            if res.get("duplicate"):
+                counts["skipped"] += 1
+                continue
+            counts["memories"] += 1
+            mid = int(res.get("memory_id") or 0)
+            status = str(item.get("status") or "")
+            if mid and status in ("superseded", "archived", "merged"):
+                with engine.lock:
+                    engine.conn.execute(
+                        "UPDATE memories SET status=?, superseded_by=? WHERE id=?",
+                        (status, int(item.get("superseded_by") or 0), mid),
+                    )
+                    engine.conn.commit()
+        except Exception as exc:
+            # 以前这里静默 continue：二次导入时 74 条无声消失、计数还显示成功
+            counts["failed"] += 1
+            try:
+                logger.warning("[amo_data] 导入记忆失败: %s" % exc)
+            except Exception:
+                pass
+            continue
+
+
+def _import_profiles(engine, data, default_bot, counts):
+    p = engine.plugin
+    for item in data.get("profiles") or []:
+        try:
+            bot = str(item.get("bot_id") or default_bot)
+            uid = str(item.get("uid") or "")
+            if not bot or not uid:
+                continue
+            current = p.profiles.get_profile(bot, uid)
+            try:
+                remote_at = int(item.get("updated_at") or 0)
+            except (TypeError, ValueError):
+                remote_at = 0
+            if current and remote_at and remote_at < int(current.get("updated_at") or 0):
+                continue
+            (getattr(p, "save_profile", None) or p.profiles.save_profile)(
+                bot, uid,
+                name=item.get("name"), alias=item.get("alias"),
+                relation=item.get("relation"), remark=item.get("remark"),
+            )
+            counts["profiles"] += 1
+        except Exception:
+            continue
+
+
+def _import_relations(engine, data, default_bot, counts):
+    p = engine.plugin
+    for item in data.get("relations") or []:
+        try:
+            if (getattr(p, "save_relation", None) or p.persons.save_relation)(
+                str(item.get("bot_id") or default_bot),
+                str(item.get("a_uid") or ""), str(item.get("b_uid") or ""),
+                str(item.get("relation") or "朋友"), str(item.get("note") or ""),
+            ):
+                counts["relations"] += 1
+        except Exception:
+            continue
+
+
+def _import_links(engine, data, default_bot, counts):
+    p = engine.plugin
+    for item in data.get("person_links") or []:
+        try:
+            bot = str(item.get("bot_id") or default_bot)
+            platform, uid = str(item.get("platform") or ""), str(item.get("uid") or "")
+            if not bot or not uid:
+                continue
+            (getattr(p, "resolve_person", None) or p.persons.resolve_person)(
+                bot, platform, uid, str(item.get("name") or ""))
+            counts["links"] += 1
+        except Exception:
+            continue
+
+
+def _import_aliases(engine, data, default_bot, counts):
+    p = engine.plugin
+    for item in data.get("identity_alias") or []:
+        try:
+            if (getattr(p, "set_identity_alias", None) or p.persons.set_identity_alias)(
+                str(item.get("bot_id") or default_bot),
+                str(item.get("platform") or ""), str(item.get("uid") or ""),
+                str(item.get("alias_platform") or ""), str(item.get("alias_uid") or ""),
+            ):
+                counts["aliases"] += 1
+        except Exception:
+            continue
+

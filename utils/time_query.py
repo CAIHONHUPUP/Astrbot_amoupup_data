@@ -101,6 +101,16 @@ def parse_time_span(text: Any, now: Optional[datetime] = None) -> Optional[Dict[
     # 先把「六号/十一点」这类中文数字换成阿拉伯数字，后面的正则就只认数字了
     raw = normalize_numbers(raw)
 
+    day_base, span = _relative_parts(raw, now)
+    if span is not None:
+        return span
+    day_base, year, month, day, month_only = _calendar_parts(raw, now, day_base)
+    hour, hour_next_day, tod, day_base = _hour_parts(raw, now, day_base, year, month, day)
+    return _assemble_span(raw, now, day_base, year, month, day, month_only,
+                          hour, hour_next_day, tod)
+
+def _relative_parts(raw, now):
+    # 1) 相对天数 + 2) 最近 N 天/小时/分钟
     # ---- 1) 相对天数 ----
     day_base = None
     for word, offset in (("大前天", 3), ("前天", 2), ("昨天", 1), ("今天", 0), ("今日", 0)):
@@ -120,8 +130,12 @@ def parse_time_span(text: Any, now: Optional[datetime] = None) -> Optional[Dict[
             delta = timedelta(days=number)
             granularity = "day"
         start = now - delta
-        return _span(start, now, granularity, match.group(0), now)
+        return None, _span(start, now, granularity, match.group(0), now)
+    return day_base, None
 
+
+def _calendar_parts(raw, now, day_base):
+    # 3) 周几 + 4) 年 + 5) 月/日
     # ---- 3) 周几 ----
     match = re.search(r"(上上|上|这|本)?\s*(?:周|星期|礼拜)\s*([一二三四五六日天1-7])", raw)
     if match:
@@ -173,7 +187,11 @@ def parse_time_span(text: Any, now: Optional[datetime] = None) -> Optional[Dict[
     elif re.search(r"(这个月|本月)", raw):
         year, month = year or now.year, now.month
         month_only = True
+    return day_base, year, month, day, month_only
 
+
+def _hour_parts(raw, now, day_base, year, month, day):
+    # 6) 具体小时 + 7) 时段归一
     # ---- 6) 具体小时 ----
     hour = None
     hour_next_day = False
@@ -216,7 +234,11 @@ def parse_time_span(text: Any, now: Optional[datetime] = None) -> Optional[Dict[
     if tod and hour is None and tod[1] <= now.hour < tod[2] and (day_base is None and not year and not month):
         # 只说"下午"没说是哪天：默认今天
         day_base = now
+    return hour, hour_next_day, tod, day_base
 
+
+def _assemble_span(raw, now, day_base, year, month, day, month_only, hour, hour_next_day, tod):
+    # 8) 组装成最终时间窗
     # ---- 组装 ----
     if year is not None or month is not None or day is not None or day_base is not None:
         base_day = day_base or now
@@ -259,6 +281,7 @@ def parse_time_span(text: Any, now: Optional[datetime] = None) -> Optional[Dict[
         return _span(day_start.replace(day=1), _next_month(day_start), "month", raw, now)
     return _span(day_start, day_end, "day", raw, now,
                  year=target.year, month=target.month, day=target.day)
+
 
 
 def _next_month(moment: datetime) -> datetime:

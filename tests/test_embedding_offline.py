@@ -16,8 +16,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import store_memory  # noqa: E402
-from store import DataStore  # noqa: E402
+import services.memory_engine as store_memory  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 
 class FakeLogger:

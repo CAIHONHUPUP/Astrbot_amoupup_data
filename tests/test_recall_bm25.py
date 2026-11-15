@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from store import DataStore  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 
 class RecallScoreTests(unittest.TestCase):

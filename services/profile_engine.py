@@ -157,13 +157,20 @@ class ProfileEngine:
             pid = self.persons.pid_for_uid(bot_id, uid)
             for table, sql, params in (
                 ("profiles", "DELETE FROM profiles WHERE bot_id=? AND uid=?", (bot_id, uid)),
-                ("memories", "DELETE FROM memories WHERE bot_id=? AND (uid=? OR pid=?)",
-                 (bot_id, uid, int(pid))),
+                # pid=0 表示“没归一过”，不能拿它当删除条件，否则会把整个 bot 的 pid=0 记忆全删掉
+                ("memories", "DELETE FROM memories WHERE bot_id=? AND " +
+                 ("(uid=? OR pid=?)" if int(pid) else "uid=?"),
+                 (bot_id, uid, int(pid)) if int(pid) else (bot_id, uid)),
                 ("relations", "DELETE FROM relations WHERE bot_id=? AND (a_uid=? OR b_uid=?)",
                  (bot_id, uid, uid)),
             ):
                 cur = self.conn.execute(sql, params)
                 counts[table] = max(0, cur.rowcount or 0)
+            try:
+                self.conn.execute(
+                    "DELETE FROM memory_vec WHERE memory_id NOT IN (SELECT id FROM memories)")
+            except Exception:
+                pass
             self.conn.commit()
         return counts
 

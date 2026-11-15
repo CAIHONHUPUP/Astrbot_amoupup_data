@@ -15,7 +15,7 @@ import astrbot_stub  # noqa: E402
 
 astrbot_stub.install()
 
-from store import DataStore  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 BOT = "bot1"
 GROUP_UMO = "aiocqhttp:GroupMessage:1055679275"

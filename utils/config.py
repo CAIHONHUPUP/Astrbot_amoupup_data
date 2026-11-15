@@ -11,7 +11,7 @@ except ImportError:  # 顶层导入（测试/脚本）
     from utils.text_process import DEFAULT_SETTINGS, RECALL_POOL
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "3.2.0"
+PLUGIN_VERSION = "3.2.7"  # 与 main.py / metadata.yaml 同步；/status 报的就是这个值
 
 
 class PluginSettings:

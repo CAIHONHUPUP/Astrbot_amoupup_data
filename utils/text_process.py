@@ -21,10 +21,10 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
     try:
         from . import clock as _clock
     except Exception:
-        import clock as _clock
+        from utils import clock as _clock
 
 # 时间解析必须两种导入都试：AstrBot 以 data.plugins.Astrbot_amoupup_data 包方式加载时，
-# 函数里的顶层 from time_query import ... 会 ModuleNotFoundError、被 except 吞掉，
+# 函数里的顶层 from time_query import ...（根目录兼容壳已删）会 ModuleNotFoundError、被 except 吞掉，
 # span 恒为 None，于是「问昨天 → 拉当天日总结」的整段逻辑从来没执行过。
 if TYPE_CHECKING:  # 只给类型检查看：包内相对导入
     from .time_query import parse_time_span as _parse_time_span
@@ -33,7 +33,7 @@ else:  # 运行时：包模式优先，按文件直接加载时退回绝对导�
         from .time_query import parse_time_span as _parse_time_span
     except Exception:
         try:
-            from time_query import parse_time_span as _parse_time_span
+            from utils.time_query import parse_time_span as _parse_time_span
         except Exception:
             _parse_time_span = None
 

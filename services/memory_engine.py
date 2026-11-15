@@ -206,6 +206,12 @@ class MemoryEngine:
                  created_at: Optional[int] = None, last_hit_at: Optional[int] = None,
                  hit_count: int = 0, keep_existing_content: bool = False) -> Dict[str, Any]:
         text = _clean(content)
+        try:
+            from .fact_guard import sanitize_memory_text
+        except ImportError:
+            from services.fact_guard import sanitize_memory_text
+        if str(kind or "") in ("event", "activity", "diary", "conversation_summary", "daily_digest"):
+            text = sanitize_memory_text(text)
         if not text:
             return {"ok": False, "reason": "empty"}
         kind = _clean(kind, 32) or "fact"
@@ -228,58 +234,20 @@ class MemoryEngine:
             pid = 0
         scope = "group" if str(scope) == "group" else "private"
         group_id = str(group_id or "") if scope == "group" else ""
-        try:
-            importance = max(0.0, min(1.0, float(importance)))
-        except (TypeError, ValueError):
-            importance = 0.5
+        meta = _norm_meta(self, importance, created_at, last_hit_at, hit_count,
+                          idem_key, subject, static, fact, text)
+        importance = meta["importance"]
+        created_at = meta["created_at"]
+        last_hit_at = meta["last_hit_at"]
+        hit_count = meta["hit_count"]
+        idem_key = meta["idem_key"]
+        subject = meta["subject"]
+
         now = _now()
-        try:
-            created_at = int(created_at) if created_at else now
-        except (TypeError, ValueError):
-            created_at = now
-        try:
-            last_hit_at = int(last_hit_at) if last_hit_at else created_at
-        except (TypeError, ValueError):
-            last_hit_at = created_at
-        try:
-            hit_count = max(0, int(hit_count or 0))
-        except (TypeError, ValueError):
-            hit_count = 0
-        idem_key = _clean(idem_key, 120)
-        subject = "bot" if str(subject or "").strip().lower() == "bot" else "user"
-        if not idem_key and self.setting("auto_dedupe", True) and static:
-            # 只有静态事实才自动生成去重键；消费/交易/流水账每次都是真实发生，必须逐条存
-            idem_key = ("fact:" + fact) if fact else _norm_key(text)
-
-        if idem_key:
-            row = self.dao.find_active_by_idem(bot_id, uid, scope, group_id, idem_key)
-            if row:
-                # 同一件事又说了一遍：抬重要度、刷新时间、合并细节，不新增行
-                try:
-                    boost = min(1.0, max(float(row["importance"] or 0), float(importance)) + 0.03)
-                except (TypeError, ValueError):
-                    boost = importance
-                if fact:
-                    old_text = str(row["content"] or "")
-                    merged = fact_dedupe.merge_fact(old_text, text)
-                    if merged and merged != old_text:
-                        self.dao.merge_content(int(row["id"]), merged, boost, now, subject, False)
-                        self._enqueue_embedding(int(row["id"]), merged)
-                    else:
-                        self.dao.touch(int(row["id"]), boost, now, subject)
-                else:
-                    self.dao.touch(int(row["id"]), boost, now, subject)
-                return {"ok": True, "memory_id": int(row["id"]), "duplicate": True}
-
-        # 近重复（换了标点/语序）也合并：二元组 Jaccard 超过阈值
-        if self.setting("auto_dedupe", True) and static:
-            cand = self._near_duplicate(bot_id, uid, scope, group_id, text)
-            if cand is not None:
-                self.dao.merge_content(int(cand["id"]), text, importance, now, subject,
-                                       bool(keep_existing_content))
-                if not keep_existing_content:
-                    self._enqueue_embedding(int(cand["id"]), text)
-                return {"ok": True, "memory_id": int(cand["id"]), "duplicate": True}
+        merged = _try_merge(self, bot_id, uid, scope, group_id, text, importance, now,
+                            subject, fact, static, keep_existing_content, idem_key)
+        if merged is not None:
+            return merged
 
         memory_id = self.dao.insert(
             bot_id, uid, pid, platform, scope, group_id, _clean(kind, 32) or "fact", subject,
@@ -405,6 +373,27 @@ class MemoryEngine:
     def delete_memory(self, bot_id: str, memory_id: int) -> bool:
         return self.dao.delete(bot_id, memory_id)
 
+    # ---------- 夜间提炼（守护插件 03:00 调） ----------
+    def nightly_candidates(self, hours: int = 24, limit: int = 300) -> List[Dict[str, Any]]:
+        """近 N 小时写入的流水记忆，交给守护插件提炼成长期事实。"""
+        return self.dao.recent_active(hours=hours, limit=limit)
+
+    def nightly_archive(self, ids: List[int]) -> int:
+        """提炼成功后把原流水标记 archived（不物理删除）；返回实际归档条数。"""
+        clean: List[int] = []
+        for value in (ids or []):
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            if number > 0 and number not in clean:
+                clean.append(number)
+        if not clean:
+            return 0
+        bounded = clean[:500]
+        self.dao.mark_archived(bounded)
+        return len(bounded)
+
     # ---------- 来源平台回填 ----------
     def backfill_memory_platform(self, bot_id: str = "", window_sec: int = 600,
                                  limit: int = 20000, apply: bool = True) -> Dict[str, Any]:
@@ -463,3 +452,64 @@ class MemoryEngine:
         if apply and updates:
             self.dao.set_platform(updates)
         return result
+
+def _norm_meta(engine, importance, created_at, last_hit_at, hit_count,
+               idem_key, subject, static, fact, text):
+    try:
+        importance = max(0.0, min(1.0, float(importance)))
+    except (TypeError, ValueError):
+        importance = 0.5
+    now = _now()
+    try:
+        created_at = int(created_at) if created_at else now
+    except (TypeError, ValueError):
+        created_at = now
+    try:
+        last_hit_at = int(last_hit_at) if last_hit_at else created_at
+    except (TypeError, ValueError):
+        last_hit_at = created_at
+    try:
+        hit_count = max(0, int(hit_count or 0))
+    except (TypeError, ValueError):
+        hit_count = 0
+    idem_key = _clean(idem_key, 120)
+    subject = "bot" if str(subject or "").strip().lower() == "bot" else "user"
+    if not idem_key and engine.setting("auto_dedupe", True) and static:
+        # 只有静态事实才自动生成去重键；消费/交易/流水账每次都是真实发生，必须逐条存
+        idem_key = ("fact:" + fact) if fact else _norm_key(text)
+    return {"importance": importance, "created_at": created_at,
+            "last_hit_at": last_hit_at, "hit_count": hit_count,
+            "idem_key": idem_key, "subject": subject}
+
+
+def _try_merge(engine, bot_id, uid, scope, group_id, text, importance, now,
+               subject, fact, static, keep_existing_content, idem_key=""):
+    """同一件事重复写入：抬重要度/合并/刷新，不新增行；返回结果或 None。"""
+    if idem_key:
+        row = engine.dao.find_active_by_idem(bot_id, uid, scope, group_id, idem_key)
+        if row:
+            try:
+                boost = min(1.0, max(float(row["importance"] or 0), float(importance)) + 0.03)
+            except (TypeError, ValueError):
+                boost = importance
+            if fact:
+                old_text = str(row["content"] or "")
+                merged_text = fact_dedupe.merge_fact(old_text, text)
+                if merged_text and merged_text != old_text:
+                    engine.dao.merge_content(int(row["id"]), merged_text, boost, now, subject, False)
+                    engine._enqueue_embedding(int(row["id"]), merged_text)
+                else:
+                    engine.dao.touch(int(row["id"]), boost, now, subject)
+            else:
+                engine.dao.touch(int(row["id"]), boost, now, subject)
+            return {"ok": True, "memory_id": int(row["id"]), "duplicate": True}
+    if engine.setting("auto_dedupe", True) and static:
+        cand = engine._near_duplicate(bot_id, uid, scope, group_id, text)
+        if cand is not None:
+            engine.dao.merge_content(int(cand["id"]), text, importance, now, subject,
+                                     bool(keep_existing_content))
+            if not keep_existing_content:
+                engine._enqueue_embedding(int(cand["id"]), text)
+            return {"ok": True, "memory_id": int(cand["id"]), "duplicate": True}
+    return None
+

@@ -13,8 +13,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from store import DataStore  # noqa: E402
-from time_query import parse_time_span  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
+from utils.time_query import parse_time_span  # noqa: E402
 
 BOT = "bot1"
 UMO = "aiocqhttp:private:302578963"

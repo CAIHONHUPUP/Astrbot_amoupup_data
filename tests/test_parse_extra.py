@@ -10,9 +10,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import clock  # noqa: E402
-import time_query as tq  # noqa: E402
-from store import DataStore  # noqa: E402
+from utils import clock  # noqa: E402
+from utils import time_query as tq  # noqa: E402
+from support.store_fixture import DataStore  # noqa: E402
 
 BOT = "bot1"
 UID = "302578963"

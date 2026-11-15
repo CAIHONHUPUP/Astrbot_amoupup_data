@@ -12,7 +12,7 @@
       '- 维护循环     -> services/maintenance_engine.py
 
 兼容红线（改名/改参数/改默认值都算破坏）：
-    * self.mem 的 39 个 async 方法签名（见 core/api.py 顶部契约清单）；
+    * self.mem 的 41 个 async 方法签名（见 core/api.py 顶部契约清单）；
     * plugin_data/Astrbot_amoupup_data/amo_data.db 的路径、表名、列名、索引名；
     * /Astrbot_amoupup_data/* 面板路由、methods 与返回结构。
 
@@ -33,13 +33,26 @@ except Exception:  # pragma: no cover - 离线环境
     _filter = None
 
 
-def _command(name):
-    finder = getattr(_filter, "command", None) if _filter is not None else None
-    if callable(finder):
-        return finder(name)
+def _command(name, admin=False):
+    """命令装饰器；admin=True 时额外要求 AstrBot 管理员（离线环境自动降级）。"""
 
     def _deco(func):
-        return func
+        wrapped = func
+        if admin and _filter is not None:
+            adder = getattr(_filter, "permission_type", None)
+            perm = getattr(getattr(_filter, "PermissionType", None), "ADMIN", None)
+            if callable(adder) and perm is not None:
+                try:
+                    wrapped = adder(perm)(wrapped)
+                except Exception:
+                    wrapped = func
+        finder = getattr(_filter, "command", None) if _filter is not None else None
+        if callable(finder):
+            try:
+                wrapped = finder(name)(wrapped)
+            except Exception:
+                pass
+        return wrapped
 
     return _deco
 
@@ -79,7 +92,7 @@ except ImportError:  # 测试/单文件按顶层 import main 时
 _clock = clock  # 兼容老测试/脚本：main._clock
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "3.2.1"  # 与 metadata.yaml 保持一致；发版时统一 bump
+PLUGIN_VERSION = "3.2.7"  # 与 metadata.yaml 保持一致；发版时统一 bump
 DEFAULT_BOT_ID = "default"
 
 
@@ -152,7 +165,7 @@ class AmoDataPlugin(WebAPIMixin, Star):
             text = "记忆库统计失败：%s" % exc
         yield event.plain_result(text)
 
-    @_command("遗忘")
+    @_command("遗忘", admin=True)
     async def forget_cmd(self, event):
         """管理员 /遗忘 <关键词>：物理删除包含关键词的记忆。"""
         raw = str(getattr(event, "message_str", "") or "").replace("／", "/").strip()
@@ -162,7 +175,8 @@ class AmoDataPlugin(WebAPIMixin, Star):
             yield event.plain_result("用法：/遗忘 <关键词>")
             return
         try:
-            count = self.memory.forget(self._bot_id({}, write=False), keyword)
+            # 写操作必须拿到真实 bot_id；读模式返回空串会让删除静默变成 0 条
+            count = self.memory.forget(self._bot_id({}, write=True), keyword)
             yield event.plain_result("已从记忆中抹除关于 %s 的 %d 条记录。" % (keyword, count))
         except Exception as exc:
             logger.warning("[amo_data] /遗忘 失败: %s" % exc)
