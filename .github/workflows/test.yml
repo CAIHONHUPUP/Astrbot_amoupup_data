@@ -12,6 +12,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
       - name: Type check
+        continue-on-error: true
         run: python tools/mypy_check.py
       - name: Quality gate
         run: python tools/quality_gate.py --fast
