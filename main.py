@@ -50,8 +50,8 @@ def _command(name, admin=False):
         if callable(finder):
             try:
                 wrapped = finder(name)(wrapped)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
         return wrapped
 
     return _deco
@@ -92,7 +92,7 @@ except ImportError:  # 测试/单文件按顶层 import main 时
 _clock = clock  # 兼容老测试/脚本：main._clock
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "3.2.7"  # 与 metadata.yaml 保持一致；发版时统一 bump
+PLUGIN_VERSION = "3.2.8"  # 与 metadata.yaml 保持一致；发版时统一 bump
 DEFAULT_BOT_ID = "default"
 
 
@@ -308,19 +308,19 @@ class AmoDataPlugin(WebAPIMixin, Star):
         try:
             if getattr(self, "_loop_task", None) is not None:
                 self._loop_task.cancel()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         try:
             await self.maintenance.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         try:
             # 向量补全后台线程收尾，否则每次热重载泄漏一个线程
             self.memory.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         try:
             self.db.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         logger.info("[amo_data] 我能永远记住你已卸载")

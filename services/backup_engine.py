@@ -66,7 +66,7 @@ class BackupEngine:
         path = str(db_path)
         if not os.path.isfile(path):
             return {}
-        conn = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True)
+        conn = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True, timeout=20)
         try:
             conn.row_factory = sqlite3.Row
             snapshot = self._snapshot_from_conn(conn, bot_id)
@@ -103,7 +103,7 @@ class BackupEngine:
             index += 1
         dest = os.path.join(dest_dir, name)
         with self.lock:
-            target = sqlite3.connect(dest)
+            target = sqlite3.connect(dest, timeout=20)
             try:
                 self.conn.backup(target)
             finally:
@@ -123,7 +123,7 @@ class BackupEngine:
             index += 1
         dest = os.path.join(dest_dir, name)
         with self.lock:
-            target = sqlite3.connect(dest)
+            target = sqlite3.connect(dest, timeout=20)
             try:
                 self.conn.backup(target)
             finally:
@@ -237,8 +237,8 @@ def _import_memories(engine, data, default_bot, counts):
             counts["failed"] += 1
             try:
                 logger.warning("[amo_data] 导入记忆失败: %s" % exc)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
             continue
 
 
@@ -308,4 +308,3 @@ def _import_aliases(engine, data, default_bot, counts):
                 counts["aliases"] += 1
         except Exception:
             continue
-

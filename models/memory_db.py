@@ -213,12 +213,14 @@ class MemoryDB:
 
     def _open(self) -> None:
         with self.lock:
-            self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=15)
+            self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=20)
             self._conn.row_factory = sqlite3.Row
             try:
                 self._conn.execute("PRAGMA journal_mode=WAL")
-            except Exception:
-                pass
+                self._conn.execute("PRAGMA busy_timeout=20000")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -234,8 +236,8 @@ class MemoryDB:
             if self._conn is not None:
                 try:
                     self._conn.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[amo_data] optional step failed: %r", exc)
                 self._conn = None
 
     # ---------- 结构 ----------
@@ -270,8 +272,8 @@ class MemoryDB:
                         "INSERT OR REPLACE INTO store_meta(key, value) VALUES('fts_rebuild_v2', '1')"
                     )
                 conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
 
 
     def _init_trigram_fts(self) -> None:
@@ -365,8 +367,8 @@ class MemoryDB:
             try:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_pid ON messages(bot_id, pid, created_at)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_mid ON messages(bot_id, message_id)")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
 
             # 记忆表补列：近重复合并计数、分层状态、来源、人物主键
             mcols = self._table_columns("memories")
@@ -382,8 +384,8 @@ class MemoryDB:
                     continue
                 try:
                     conn.execute(ddl)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[amo_data] optional step failed: %r", exc)
 
             # 历史回填：先补消息 pid（她自己的发言行 umo 尾部就是对方 uid），
             # 再按 uid 把记忆挂到人物上；都只动 pid 仍为 0 的行。
@@ -404,8 +406,8 @@ class MemoryDB:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_mem_pid ON memories(bot_id, pid, scope, group_id)"
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
 
             # 旧版把 bot 自己发的照片/语音写在用户 uid 下，subject 补成 bot。
             try:
@@ -413,8 +415,8 @@ class MemoryDB:
                     "UPDATE memories SET subject='bot' WHERE subject='user' "
                     "AND (content LIKE '[我发的照片]%' OR content LIKE '[我发的语音]%')"
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
 
             # 去重索引要跟着 scope 走：老库是 (bot_id, uid, idem_key)，
             # 同句在群聊和私聊各说一次会撞 UNIQUE。

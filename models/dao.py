@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger("amo_data")
+
 import sqlite3
 from typing import Any, Dict, List, Optional
 
@@ -136,8 +139,8 @@ class MemoryDao:
                 # 向量表是独立表，不跟着删会一直堆积（AUTOINCREMENT 不复用 id，不会串数据）
                 try:
                     self.conn.execute("DELETE FROM memory_vec WHERE memory_id=?", (int(memory_id),))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[amo_data] optional step failed: %r", exc)
             self.conn.commit()
             return bool(cur.rowcount)
 
@@ -309,8 +312,8 @@ class MemoryDao:
             try:
                 self.conn.execute(
                     "DELETE FROM memory_vec WHERE memory_id NOT IN (SELECT id FROM memories)")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
             self.conn.commit()
             return int(cur.rowcount or 0)
 

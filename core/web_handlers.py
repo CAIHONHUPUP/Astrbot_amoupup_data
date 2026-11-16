@@ -64,14 +64,14 @@ class WebHandlersMixin:
             if web_request is not None and hasattr(web_request, "json"):
                 data = await web_request.json(default={})
                 return data if isinstance(data, dict) else {}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         try:
             if web_request is not None:
                 data = await web_request.get_json(silent=True)
                 return data if isinstance(data, dict) else {}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         return {}
 
 

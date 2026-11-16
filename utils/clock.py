@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger("amo_data")
+
 from typing import TYPE_CHECKING
 
 import os
@@ -89,8 +92,8 @@ def get_zone(name):
     if ZoneInfo is not None:
         try:
             return ZoneInfo(name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
     if name in ("Asia/Shanghai", "Asia/Chongqing", "PRC", "CST-8", "Asia/Beijing"):
         return _FixedOffset(8)
     return None
@@ -128,8 +131,8 @@ def restore():
         try:
             if hasattr(_time, "tzset"):
                 _time.tzset()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
     _applied.update({"ok": False, "name": "", "prev": None})
     _state["name"] = ""
 

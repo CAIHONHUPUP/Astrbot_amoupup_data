@@ -149,8 +149,8 @@ class MessageEngine:
             since_ts = int(since)
         try:
             uid = self.plugin.persons.canonical_uid_for_uid(bot_id, uid) or uid
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         where, params = self._msg_filters(bot_id, umo, uid)
         sql = ("SELECT id, umo, uid, name, role, content, created_at, platform, pid, group_name "
                "FROM messages" + where)
@@ -216,8 +216,8 @@ class MessageEngine:
         if zone is not None:
             try:
                 return int(dt.replace(tzinfo=zone).timestamp())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
         try:
             return int(dt.timestamp())
         except Exception:
@@ -385,8 +385,8 @@ class MessageEngine:
         limit = max(1, min(int(limit or 200), 1000))
         try:
             uid = self.plugin.persons.canonical_uid_for_uid(bot_id, uid) or uid
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         start, end = self._time_window(query)
         if not start or not end:
             return []
@@ -481,8 +481,8 @@ class MessageEngine:
                    uid: str, role: str | None, kind: str = "") -> List[Dict[str, Any]]:
         try:
             uid = self.plugin.persons.canonical_uid_for_uid(bot_id, uid) or uid
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         where, params = _bot_filter(bot_id)
         sql = ("SELECT id, umo, uid, name, role, content, created_at, compressed, "
                "platform, pid, group_name FROM messages WHERE 1=1" + where)

@@ -50,8 +50,8 @@ class MemoryEngine:
             if self.setting("embedding_backfill"):
                 try:
                     self.backfill_embeddings(limit=int(self.setting("embedding_backfill_limit", 200)))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[amo_data] optional step failed: %r", exc)
 
     # ---------- 配置 ----------
     def setting(self, key: str, default: Any = None) -> Any:
@@ -144,8 +144,8 @@ class MemoryEngine:
                         "[能记] 连不上 embedding 服务 %s（%s）：语义召回已退回关键词，"
                         "记忆读写不受影响；装好服务或关掉 embedding_enabled 即可" % (url, model)
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[amo_data] optional step failed: %r", exc)
         return []
 
     def _embed_cached(self, text: str) -> List[float]:
@@ -164,8 +164,8 @@ class MemoryEngine:
             self.dao.store_vec(
                 int(memory_id), str(self.setting("embedding_model", "") or ""), vec
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
 
     def _load_vecs(self, ids: List[int]) -> Dict[int, List[float]]:
         return self.dao.load_vecs(ids)
@@ -196,8 +196,8 @@ class MemoryEngine:
     def close(self) -> None:
         try:
             self._emb_queue.put_nowait(None)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
 
     # ---------- 写 ----------
     def remember(self, bot_id: str, uid: str, content: str, kind: str = "fact",
@@ -366,8 +366,8 @@ class MemoryEngine:
                 pid = self.persons.pid_for_uid(bot_id, uid)
             if uid and self.persons is not None:
                 uid = self.persons.canonical_uid_for_uid(bot_id, uid) or uid
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         return self.dao.list_by_person(bot_id, uid, pid, limit)
 
     def delete_memory(self, bot_id: str, memory_id: int) -> bool:

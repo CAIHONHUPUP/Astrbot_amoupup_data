@@ -235,8 +235,8 @@ class RetrievalEngine:
                     ).fetchall()
                 seen = {int(r["id"]) for r in rows}
                 rows.extend([r for r in digests if int(r["id"]) not in seen])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
         return rows
 
     def _recall_scores(self, ctx, rows):
@@ -362,8 +362,8 @@ class RetrievalEngine:
                                     ("干了什么", "干什么", "干啥", "做了什么", "做了啥",
                                      "聊了什么", "说了什么", "怎么过的", "过得怎么样"))
                         score += 0.5 if vague else 0.2
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("[amo_data] optional step failed: %r", exc)
             elif kind == "conversation_summary" and (not text or rel >= 0.35):
                 score += 0.02
             item = dict(row)

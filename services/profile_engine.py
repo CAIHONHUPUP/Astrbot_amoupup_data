@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from astrbot.api import logger
+
 import sqlite3
 
 
@@ -169,8 +171,8 @@ class ProfileEngine:
             try:
                 self.conn.execute(
                     "DELETE FROM memory_vec WHERE memory_id NOT IN (SELECT id FROM memories)")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
             self.conn.commit()
         return counts
 

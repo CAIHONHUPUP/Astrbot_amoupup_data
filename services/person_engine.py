@@ -140,8 +140,8 @@ class PersonEngine:
                 "AND (platform=? OR platform='')",
                 (int(pid), str(platform), str(bot_id), str(uid), str(platform)),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
 
 
     def link_identity(self, bot_id: str, platform: str, uid: str, pid: int = 0,
@@ -902,8 +902,8 @@ class PersonEngine:
                 ).fetchone()
             if row and str(row["name"] or "").strip():
                 return str(row["name"]).strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         try:
             with self.lock:
                 row = self.conn.execute(
@@ -912,8 +912,8 @@ class PersonEngine:
                 ).fetchone()
             if row and str(row["name"] or "").strip():
                 return str(row["name"]).strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         return ""
 
 

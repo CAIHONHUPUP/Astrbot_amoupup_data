@@ -42,8 +42,8 @@ class MaintenanceEngine:
         if self._task is not None:
             try:
                 self._task.cancel()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
             self._task = None
 
     async def _loop(self) -> None:
@@ -115,8 +115,8 @@ class MaintenanceEngine:
         try:
             if self.plugin.cache.cache_get(bot_id, key):
                 return {"skipped": True}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         result: Dict[str, Any] = {}
         try:
             result["compress"] = self.plugin.compression.compress_memories(bot_id, apply=True)
@@ -128,8 +128,8 @@ class MaintenanceEngine:
             result["archive"] = {"error": str(exc)}
         try:
             self.plugin.cache.cache_set(bot_id, key, "1", ttl=8 * 86400)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         logger.info("[amo_data] 每周记忆整理: %s" % result)
         return result
 
@@ -143,13 +143,13 @@ class MaintenanceEngine:
         try:
             if self.plugin.cache.cache_get(bot_id, key):
                 return ""
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         path = self.plugin.backup.backup_now(int(self.settings.get("backup_keep", 7) or 7))
         try:
             self.plugin.cache.cache_set(bot_id, key, "1", ttl=2 * 86400)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
         if path:
             logger.info("[amo_data] 每日备份: %s" % path)
         return path
@@ -179,6 +179,6 @@ class MaintenanceEngine:
                         ([status] + (params if where else [])),
                     ).fetchone()
                     out["memories_" + status] = int(row["c"] or 0) if row else 0
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[amo_data] optional step failed: %r", exc)
         return out
