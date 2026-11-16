@@ -119,7 +119,11 @@ class MaintenanceEngine:
             logger.debug("[amo_data] optional step failed: %r", exc)
         result: Dict[str, Any] = {}
         try:
-            result["compress"] = self.plugin.compression.compress_memories(bot_id, apply=True)
+            # 压缩是同步重活（摘要拆分 + 近重复两两比对，几百条就要几百毫秒），
+            # 放线程池里跑，别把 AstrBot 的事件循环卡住（卡住=所有聊天排队）
+            result["compress"] = await asyncio.to_thread(
+                self.plugin.compression.compress_memories, bot_id, True
+            )
         except Exception as exc:
             result["compress"] = {"error": str(exc)}
         try:

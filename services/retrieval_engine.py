@@ -28,6 +28,15 @@ except ImportError:  # 顶层导入（测试/脚本）
         _now, _parse_time_span, _query_chars, _recall_tokens, logger,
     )
 
+# fact_dedupe 必须相对导入优先：AstrBot 以 data.plugins.<插件> 包方式加载时没有顶层
+# services 模块，函数里临时 `from services import ...` 会 ImportError 被吞掉，
+# 注入去重就静默失效（同一件事会在召回里出现两条）。
+try:
+    from ..services import fact_dedupe
+except ImportError:  # 顶层导入（测试/脚本）
+    from services import fact_dedupe
+
+
 # 「你还记得我吗」这类没有实词的元问题：关键词闸门会一条都不给，单独兜底。
 _META_PATTERNS = (
     "记得我吗", "记得我么", "还记得我吗", "记得我是谁", "记得我是谁吗",
@@ -389,11 +398,7 @@ class RetrievalEngine:
             if len(items) >= limit:
                 break
             toks = tokens_by_id.get(int(item["id"]), set())
-            try:
-                from services import fact_dedupe as _facts
-            except ImportError:  # pragma: no cover
-                _facts = None
-            fkey = _facts.fact_key(str(item.get("content") or "")) if _facts else ""
+            fkey = fact_dedupe.fact_key(str(item.get("content") or ""))
             if fkey and fkey in selected_facts:
                 continue
             if div_ratio > 0 and toks and any(

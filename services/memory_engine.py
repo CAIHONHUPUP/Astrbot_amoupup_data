@@ -373,13 +373,21 @@ class MemoryEngine:
     def delete_memory(self, bot_id: str, memory_id: int) -> bool:
         return self.dao.delete(bot_id, memory_id)
 
+    def bot_of_memory(self, memory_id: int) -> str:
+        """面板只传记忆 id 时反查它属于哪个 bot（多 bot 库不会删漏）。"""
+        return self.dao.bot_of(memory_id)
+
     # ---------- 夜间提炼（守护插件 03:00 调） ----------
     def nightly_candidates(self, hours: int = 24, limit: int = 300) -> List[Dict[str, Any]]:
         """近 N 小时写入的流水记忆，交给守护插件提炼成长期事实。"""
         return self.dao.recent_active(hours=hours, limit=limit)
 
-    def nightly_archive(self, ids: List[int]) -> int:
-        """提炼成功后把原流水标记 archived（不物理删除）；返回实际归档条数。"""
+    def nightly_archive(self, ids: List[int], bot_id: str = "", uid: str = "") -> int:
+        """提炼成功后把原流水标记 archived（不物理删除）；返回实际归档条数。
+
+        调用方传的 ids 一律不可信：带 bot_id/uid 时 UPDATE 里再加这两个条件，
+        不在名下的 id 直接跳过（只打一行日志），绝不归档别人的记忆。
+        """
         clean: List[int] = []
         for value in (ids or []):
             try:
@@ -391,8 +399,14 @@ class MemoryEngine:
         if not clean:
             return 0
         bounded = clean[:500]
-        self.dao.mark_archived(bounded)
-        return len(bounded)
+        archived = int(self.dao.mark_archived(bounded, bot_id, uid) or 0)
+        skipped = len(bounded) - archived
+        if skipped > 0:
+            logger.warning(
+                "[amo_data] 夜间归档：%d 条记忆不属于 bot=%s uid=%s，已跳过",
+                skipped, bot_id or "*", uid or "*",
+            )
+        return archived
 
     # ---------- 来源平台回填 ----------
     def backfill_memory_platform(self, bot_id: str = "", window_sec: int = 600,
@@ -503,6 +517,17 @@ def _try_merge(engine, bot_id, uid, scope, group_id, text, importance, now,
             else:
                 engine.dao.touch(int(row["id"]), boost, now, subject)
             return {"ok": True, "memory_id": int(row["id"]), "duplicate": True}
+        # 同一 idem_key 的旧行被归档/取代/合并后仍然占着唯一索引：再写同一件事必须
+        # 复活/并回它，否则 INSERT 撞 UNIQUE 约束、整条记忆被静默丢掉。
+        stale = engine.dao.find_by_idem(bot_id, uid, scope, group_id, idem_key)
+        if stale is not None:
+            base_id = int(stale["superseded_by"] or 0)
+            status = str(stale["status"] or "active")
+            if (status == "merged" and base_id > 0
+                    and engine.dao.touch(base_id, importance, now, subject)):
+                return {"ok": True, "memory_id": base_id, "duplicate": True}
+            engine.dao.revive(int(stale["id"]), importance, now, subject)
+            return {"ok": True, "memory_id": int(stale["id"]), "duplicate": True}
     if engine.setting("auto_dedupe", True) and static:
         cand = engine._near_duplicate(bot_id, uid, scope, group_id, text)
         if cand is not None:

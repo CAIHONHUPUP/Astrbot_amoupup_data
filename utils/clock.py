@@ -103,6 +103,12 @@ def configure(name=""):
     """插件启动时调用一次：设置进程时区。返回实际生效的时区名。"""
     _state["name"] = normalize(name)
     target = resolve_name(_state["name"])
+    if get_zone(target) is None:
+        # 名字写错（Asia/Shangai、GMT+8:00…）时 tzset 不抛异常（glibc 回落 UTC），
+        # 于是整个插件按 UTC 算时间却没有任何提示。这里回退默认时区（与能陪一致）。
+        logger.debug("[amo_data] 时区名无效: %r，已回退 %s", target, DEFAULT_TIMEZONE)
+        target = DEFAULT_TIMEZONE
+        _state["name"] = target
     prev = os.environ.get("TZ")
     if not hasattr(_time, "tzset"):
         # Windows 等没有 tzset 的平台：把 TZ 写成 "Asia/Shanghai" 这种 IANA 名字，

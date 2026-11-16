@@ -207,7 +207,10 @@ class MemoryAPI:
                 if number > 0 and number not in absorbed:
                     keep.append(number)
             try:
-                archived = await asyncio.to_thread(self._p.memory.nightly_archive, keep)
+                # 只归档属于 meta 里这个 bot/uid 的行：ids 来自调用方，不能全信
+                archived = await asyncio.to_thread(
+                    self._p.memory.nightly_archive, keep, bot_id, uid
+                )
             except Exception as exc:
                 logger.debug("[amo_data] 夜间记忆归档失败: %s" % exc)
         return {"written": written, "archived": int(archived or 0)}
@@ -319,7 +322,11 @@ class MemoryAPI:
     async def compress_memories(self, bot_id: str, apply: bool = True) -> dict:
         """周度整理：合并同天摘要、近重复记忆标过期（不删数据）。"""
         try:
-            return self._p.compression.compress_memories(self._bot(bot_id), apply=bool(apply))
+            # 周度整理是同步重活（摘要拆分 + 近重复两两比对）：放线程里跑，
+            # 别卡住事件循环（守护插件和面板都会 await 这个门面）
+            return await asyncio.to_thread(
+                self._p.compression.compress_memories, self._bot(bot_id), apply=bool(apply)
+            )
         except Exception as exc:
             logger.debug("[amo_data] 记忆压缩失败: %s" % exc)
             return {"merged_summaries": 0, "merged_near_duplicates": 0, "applied": bool(apply)}

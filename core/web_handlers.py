@@ -288,13 +288,17 @@ class WebHandlersMixin:
 
     async def api_memory_delete(self):
         payload = await self._body()
-        bot_id = self._bot_id(payload)
         try:
             memory_id = int(payload.get("id") or 0)
         except (TypeError, ValueError):
             memory_id = 0
         if not memory_id:
             return {"code": 1, "msg": "缺少 id"}
+        # 面板只传 id（不带 bot_id）：先按 id 反查这条记忆属于哪个 bot，
+        # 否则多 bot 库里会拿错 bot_id，DELETE 静默删 0 条。
+        bot_id = str(payload.get("bot_id") or "").strip()
+        if not bot_id:
+            bot_id = self.memory.bot_of_memory(memory_id) or self._bot_id(payload, write=True)
         return {"code": 0, "data": {"deleted": self.memory.delete_memory(bot_id, memory_id)}}
 
 

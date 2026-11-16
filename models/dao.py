@@ -56,16 +56,43 @@ class MemoryDao:
                 (bot_id, uid, scope, group_id, idem_key),
             ).fetchone()
 
-    def touch(self, memory_id: int, importance: float, now: int, subject: str) -> None:
-        """同一件事又说一遍：抬重要度、刷新时间、合并计数 +1，不新增行。"""
+    def find_by_idem(self, bot_id: str, uid: str, scope: str, group_id: str,
+                     idem_key: str) -> Optional[sqlite3.Row]:
+        """同一去重键的任意状态行（active 优先）：旧行归档/取代/合并后再写同一件事时用。"""
+        if not idem_key:
+            return None
+        with self.lock:
+            return self.conn.execute(
+                "SELECT id, content, importance, status, superseded_by FROM memories "
+                "WHERE bot_id=? AND uid=? AND scope=? AND group_id=? AND idem_key=? "
+                "ORDER BY CASE COALESCE(status,'active') WHEN 'active' THEN 0 ELSE 1 END, id "
+                "LIMIT 1",
+                (bot_id, uid, scope, group_id, idem_key),
+            ).fetchone()
+
+    def revive(self, memory_id: int, importance: float, now: int, subject: str) -> None:
+        """把归档/取代/过期的旧事实重新激活（用户又说了一遍同一件事）。"""
         with self.lock:
             self.conn.execute(
+                "UPDATE memories SET status='active', superseded_by=0, "
+                "importance=MAX(importance, ?), last_hit_at=?, "
+                "merged_count=COALESCE(merged_count,1)+1, "
+                "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
+                (importance, now, subject, int(memory_id)),
+            )
+            self.conn.commit()
+
+    def touch(self, memory_id: int, importance: float, now: int, subject: str) -> bool:
+        """同一件事又说一遍：抬重要度、刷新时间、合并计数 +1，不新增行。"""
+        with self.lock:
+            cur = self.conn.execute(
                 "UPDATE memories SET importance=MAX(importance, ?), last_hit_at=?, "
                 "merged_count=merged_count+1, "
                 "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
                 (importance, now, subject, int(memory_id)),
             )
             self.conn.commit()
+            return bool(cur.rowcount)
 
     def merge_content(self, memory_id: int, content: str, importance: float, now: int,
                       subject: str, keep_existing: bool) -> None:
@@ -166,59 +193,6 @@ class MemoryDao:
             rows = self.conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
-    def count_active(self, bot_id: str, uid: str, pid: int) -> int:
-        with self.lock:
-            if pid:
-                row = self.conn.execute(
-                    "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND (pid=? OR "
-                    "(COALESCE(pid,0)=0 AND uid=?)) AND COALESCE(status,'active')='active'",
-                    (bot_id, pid, uid),
-                ).fetchone()
-            else:
-                row = self.conn.execute(
-                    "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND uid=? "
-                    "AND COALESCE(status,'active')='active'",
-                    (bot_id, uid),
-                ).fetchone()
-        return int(row["n"]) if row else 0
-
-    def recall_candidates(self, base: str, params: List[Any], text: str,
-                          pool_size: int) -> List[sqlite3.Row]:
-        """子串命中 + 最近活跃两层粗筛；这里只取候选，排序交给引擎。"""
-        rows: List[sqlite3.Row] = []
-        with self.lock:
-            if text:
-                rows = self.conn.execute(
-                    base + " AND content LIKE ? ORDER BY last_hit_at DESC, created_at DESC LIMIT ?",
-                    list(params) + ["%" + text + "%", int(pool_size)],
-                ).fetchall()
-        return rows
-
-    def recent_candidates(self, base: str, params: List[Any],
-                          recent_pool: int) -> List[sqlite3.Row]:
-        with self.lock:
-            return self.conn.execute(
-                base + " ORDER BY last_hit_at DESC, created_at DESC LIMIT ?",
-                list(params) + [int(recent_pool)],
-            ).fetchall()
-
-    def digest_candidates(self, base: str, params: List[Any], date_tag: str) -> List[sqlite3.Row]:
-        with self.lock:
-            return self.conn.execute(
-                base + " AND kind='daily_digest' AND content LIKE ? LIMIT 3",
-                list(params) + ["%" + date_tag + "%"],
-            ).fetchall()
-
-    def bump_hits(self, memory_ids: List[int], now: int) -> None:
-        if not memory_ids:
-            return
-        with self.lock:
-            self.conn.executemany(
-                "UPDATE memories SET hit_count=hit_count+1, last_hit_at=? WHERE id=?",
-                [(now, int(mid)) for mid in memory_ids],
-            )
-            self.conn.commit()
-
     # ---------- 归档 / 压缩 ----------
     def archive_candidates(self, where: str, params: List[Any], max_importance: float,
                            cutoff: int) -> List[int]:
@@ -232,15 +206,27 @@ class MemoryDao:
             ).fetchall()
         return [int(row["id"]) for row in rows]
 
-    def mark_archived(self, ids: List[int]) -> None:
+    def mark_archived(self, ids: List[int], bot_id: str = "", uid: str = "") -> int:
+        """标记 archived；给了 bot_id/uid 时只动名下的行，别人的记忆一条都不许碰。"""
         if not ids:
-            return
+            return 0
+        sql = "UPDATE memories SET status='archived' WHERE id=?"
+        if bot_id:
+            sql += " AND bot_id=?"
+        if uid:
+            sql += " AND uid=?"
+        rows = []
+        for value in ids:
+            params: List[Any] = [int(value)]
+            if bot_id:
+                params.append(str(bot_id))
+            if uid:
+                params.append(str(uid))
+            rows.append(tuple(params))
         with self.lock:
-            self.conn.executemany(
-                "UPDATE memories SET status='archived' WHERE id=?",
-                [(i,) for i in ids],
-            )
+            cur = self.conn.executemany(sql, rows)
             self.conn.commit()
+            return int(cur.rowcount or 0)
 
     def recent_active(self, hours: int = 24, limit: int = 300) -> List[Dict[str, Any]]:
         """近 N 小时内写入、仍然 active 的「流水记忆」（夜间提炼用）。
@@ -262,10 +248,24 @@ class MemoryDao:
                 "importance, created_at FROM memories "
                 "WHERE COALESCE(status,'active')='active' AND created_at>=? "
                 "AND COALESCE(kind,'')!='pinned' "
+                # 摘要不是「流水」：夜间提炼会把候选当零碎流水归档，
+                # 日总结/会话摘要一旦被归档就不再参与召回（等于静默丢掉一天的总结）。
+                "AND COALESCE(kind,'') NOT IN ('daily_digest', 'conversation_summary') "
                 "ORDER BY created_at ASC, id ASC LIMIT ?",
                 (int(since), max(1, min(cap, 1000))),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def bot_of(self, memory_id: int) -> str:
+        """按记忆 id 反查 bot_id（面板只传 id 时用）。"""
+        try:
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT bot_id FROM memories WHERE id=?", (int(memory_id),)
+                ).fetchone()
+        except Exception:
+            return ""
+        return str(row["bot_id"] or "") if row else ""
 
     def long_summaries(self, where: str, params: List[Any], cap: int,
                        limit: int) -> List[sqlite3.Row]:
@@ -280,10 +280,6 @@ class MemoryDao:
                 list(params) + [int(cap), max(1, int(limit))],
             ).fetchall()
 
-    def update_content(self, memory_id: int, content: str) -> None:
-        with self.lock:
-            self.conn.execute("UPDATE memories SET content=? WHERE id=?", (content, int(memory_id)))
-            self.conn.commit()
 
     def insert_piece(self, row: sqlite3.Row, content: str, now: int) -> int:
         with self.lock:

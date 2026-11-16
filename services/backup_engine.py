@@ -69,7 +69,17 @@ class BackupEngine:
         conn = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True, timeout=20)
         try:
             conn.row_factory = sqlite3.Row
+            # 随便一个 .db / 损坏文件也能打开：表格对不上时必须当「备份损坏」，
+            # 不能让 _snapshot_from_conn 把异常吞成空快照、面板显示"恢复成功 0 条"。
+            probe = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('memories', 'profiles')"
+            ).fetchall()
+            if len(probe) < 2:
+                return {}
             snapshot = self._snapshot_from_conn(conn, bot_id)
+        except sqlite3.DatabaseError:
+            return {}
         finally:
             conn.close()
         snapshot["counts"] = {k: len(snapshot.get(k) or []) for k in self._EXPORT_TABLES}
