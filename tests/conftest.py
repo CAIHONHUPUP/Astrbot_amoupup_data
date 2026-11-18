@@ -27,12 +27,13 @@ try:
 except ImportError:  # pragma: no cover - stub 缺失时退回旧行为
     pass
 
-os.environ["TZ"] = "Asia/Shanghai"
-try:
-    import time as _time
-    getattr(_time, "tzset")()
-except AttributeError:  # Windows 没有 tzset；本机时区本来就是上海
-    pass
+import time as _time
+if hasattr(_time, "tzset"):
+    # 只有 Unix 的 tzset 才真的能换时区。Windows 上「只设 TZ 不 tzset」会让 C 运行库
+    # 把 IANA 名字当非法值回落 UTC，datetime.now() 直接差 8 小时（2026-11-18 本地
+    # 9 个测试因此红）；Windows 本机时区本来就是上海，不碰 TZ 最安全。
+    os.environ["TZ"] = "Asia/Shanghai"
+    _time.tzset()
 
 _ORIG_MKDTEMP = tempfile.mkdtemp
 _TEMP_ROOT = _ORIG_MKDTEMP(prefix="amo-tests-")
