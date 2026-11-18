@@ -15,15 +15,8 @@ from services.log_engine import LogEngine
 from services.profile_engine import ProfileEngine
 
 
-class FakeDB:
-    def __init__(self):
-        self.conn = sqlite3.connect(":memory:")
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute(
-            "CREATE TABLE cache(bot_id TEXT, key TEXT, value TEXT, "
-            "updated_at INTEGER, expires_at INTEGER, PRIMARY KEY(bot_id, key))"
-        )
-        self.lock = threading.Lock()
+# Phase 13 P2：sqlite 内存库桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import CacheDB as FakeDB  # noqa: E402
 
 
 def _isolated_modules():

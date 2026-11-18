@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from astrbot.api import logger
 from astrbot.api.star import Context, Star
@@ -58,6 +58,7 @@ def _command(name, admin=False):
 
 try:  # AstrBot 正常加载（包模式）
     from .core.api import MemoryAPI
+    from .core import memory_tooling
     from .core.web_api import WebAPIMixin, web_request
     from .models.memory_db import MemoryDB
     from .services.backup_engine import BackupEngine
@@ -72,8 +73,10 @@ try:  # AstrBot 正常加载（包模式）
     from .services.retrieval_engine import RetrievalEngine
     from .utils import clock
     from .utils.config import PluginSettings
+    from .utils.config_watch import ConfigWatcher
 except ImportError:  # 测试/单文件按顶层 import main 时
     from core.api import MemoryAPI
+    from core import memory_tooling
     from core.web_api import WebAPIMixin, web_request
     from models.memory_db import MemoryDB
     from services.backup_engine import BackupEngine
@@ -88,11 +91,12 @@ except ImportError:  # 测试/单文件按顶层 import main 时
     from services.retrieval_engine import RetrievalEngine
     from utils import clock
     from utils.config import PluginSettings
+    from utils.config_watch import ConfigWatcher
 
 _clock = clock  # 兼容老测试/脚本：main._clock
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "3.3.0"  # 与 metadata.yaml 保持一致；发版时统一 bump
+PLUGIN_VERSION = "3.4.0"  # 与 metadata.yaml 保持一致；发版时统一 bump
 DEFAULT_BOT_ID = "default"
 
 
@@ -193,6 +197,8 @@ class AmoDataPlugin(WebAPIMixin, Star):
 
         # 配置 -> 强类型设置（原 _cfg_* / _store_settings / chat_days 等）
         self.settings = PluginSettings(self.config)
+        # 配置热更新：面板保存后，/status、/recall、/remember 入口会先比对文件 mtime
+        self.config_watcher = self._build_config_watcher()
 
         # ---- models：连接、建表、迁移、WAL、锁、备份文件 ----
         self.db = MemoryDB(os.path.join(self.data_dir, "amo_data.db"))
@@ -212,12 +218,16 @@ class AmoDataPlugin(WebAPIMixin, Star):
         self.maintenance = MaintenanceEngine(self)
 
         # 引擎之间通过 plugin 互相调用（人物/聊天/备份/维护）
-        for engine in (self.persons, self.profiles, self.memory, self.retrieval,
-                       self.compression, self.messages, self.logs, self.cache, self.backup):
+        engines: tuple[Any, ...] = (
+            self.persons, self.profiles, self.memory, self.retrieval,
+            self.compression, self.messages, self.logs, self.cache, self.backup,
+        )
+        for engine in engines:
             engine.plugin = self
 
         # ---- core：跨插件门面 + 面板路由 ----
         self.mem = MemoryAPI(self)
+        self._register_memory_tools()
         self.db_path = self.db.path
         self.store = _PluginStoreView(self)
         self.persons.bootstrap()
@@ -229,6 +239,184 @@ class AmoDataPlugin(WebAPIMixin, Star):
         self._loop_task = self.maintenance._task
 
         logger.info("[amo_data] 我能永远记住你 %s 已加载（%s）", PLUGIN_VERSION, self.db.path)
+
+    # ---- 配置热更新：面板改完配置不用重启插件 ----
+    def _config_file_candidates(self) -> list:
+        """只认 data/config/<插件目录名>_config.json 这两条固定路径。"""
+        name = os.path.basename(self.plugin_dir)
+        data_root = os.path.dirname(os.path.dirname(self.plugin_dir))
+        paths = [os.path.join(data_root, "config", name + "_config.json")]
+        try:
+            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+            paths.append(os.path.join(get_astrbot_data_path(), "config", name + "_config.json"))
+        except Exception as exc:
+            logger.debug("[amo_data] 取 AstrBot data 路径失败: %s", exc)
+        return paths
+
+    def _build_config_watcher(self):
+        try:
+            if not self.settings.get("config_watch", True):
+                return None
+        except Exception as exc:
+            logger.debug("[amo_data] 读 config_watch 失败: %s", exc)
+        for path in self._config_file_candidates():
+            if not os.path.isfile(path):
+                continue
+            watcher = ConfigWatcher(path, allowed_dir=os.path.dirname(path))
+            if watcher.enabled:
+                return watcher
+        return None
+
+    def refresh_config(self) -> bool:
+        """返回 True 表示这次真的换了一份新配置（解析失败时保留旧配置）。"""
+        watcher = getattr(self, "config_watcher", None)
+        if watcher is None or not self.settings.get("config_watch", True):
+            return False
+        if not watcher.maybe_reload():
+            return False
+        new_config = watcher.get()
+        try:
+            self.settings.reload(new_config)
+        except Exception as exc:
+            logger.warning("[amo_data] 配置热更新失败，保留旧配置: %s", exc)
+            return False
+        self.config = new_config
+        logger.info("[amo_data] 配置已热更新（%d 项）", len(new_config))
+        return True
+
+    # ---- LLM 工具：主动回忆 / 主动记 / 主动忘（模型自己决定要不要查） ----
+    def _register_memory_tools(self) -> None:
+        """给主模型注册记忆工具；关闭配置或离线环境时安静跳过。"""
+        if not self._cfg_bool("memory_tools_enabled", True):
+            return
+        maker = getattr(_filter, "llm_tool", None) if _filter is not None else None
+        if not callable(maker):
+            return
+        for name, func in (
+            ("recall_long_term_memory", self.memory_recall_tool),
+            ("memorize_long_term_memory", self.memory_memorize_tool),
+            ("forget_long_term_memory", self.memory_forget_tool),
+            ("correct_long_term_memory", self.memory_correct_tool),
+        ):
+            try:
+                maker(name=name)(func)
+            except Exception as exc:  # 旧版 AstrBot 没有 llm_tool 时不影响插件加载
+                logger.debug("[amo_data] 注册 LLM 工具 %s 失败: %r", name, exc)
+
+    async def memory_recall_tool(self, event, query: str = "", limit: int = 6):
+        """从长期记忆里查与 query 有关的记录（查证用，不是新指令）。
+
+        Args:
+            query(string): 要查的事/人/约定/时间；空字符串=按当前说话人最近的记忆兜底
+            limit(number): 最多返回几条，1-20
+
+        Returns:
+            str: 带 id 和日期的记忆证据清单；查不到会明确说「没查到不等于没发生」
+        """
+        ident = memory_tooling.event_identity(event)
+        if not ident["uid"]:
+            return "拿不到当前说话人身份，这次不查记忆。"
+        want = memory_tooling.clamp_limit(limit)
+        try:
+            items = await self.mem.recall(
+                self._bot_id({}, write=True), ident["uid"], str(query or ""),
+                limit=want, scope=ident["scope"], group_id=ident["group_id"],
+                platform=ident["platform"],
+            )
+        except Exception as exc:
+            logger.warning("[amo_data] recall 工具失败: %s" % exc)
+            return "记忆检索失败（%s），这次当作没查到。" % type(exc).__name__
+        return memory_tooling.format_recall(items, want)
+
+    async def memory_memorize_tool(self, event, content: str, kind: str = "fact",
+                                   importance: float = 0.6):
+        """把一条值得长期记住的事写进记忆（用户偏好/约定/重要事件才写）。
+
+        Args:
+            content(string): 一句话事实（谁、什么、什么时候），不要写整段对话
+            kind(string): fact/preference/important_event/event 等
+            importance(number): 0-1，越重要越大
+        """
+        ident = memory_tooling.event_identity(event)
+        if not ident["uid"]:
+            return "拿不到当前说话人身份，这次不记。"
+        text = str(content or "").strip()
+        if len(text) < 2:
+            return "内容太短，没有记。"
+        try:
+            saved = await self.mem.remember(
+                self._bot_id({}, write=True), ident["uid"], text,
+                kind=str(kind or "fact"), importance=float(importance or 0.6),
+                scope=ident["scope"], group_id=ident["group_id"],
+                platform=ident["platform"],
+            )
+        except Exception as exc:
+            logger.warning("[amo_data] memorize 工具失败: %s" % exc)
+            return "写入记忆失败（%s）。" % type(exc).__name__
+        if (saved or {}).get("ok"):
+            return "已记住（id=%s）。" % (saved or {}).get("memory_id")
+        return "没记住：%s" % ((saved or {}).get("reason") or "未知原因")
+
+    async def memory_correct_tool(self, event, hint: str, right_content: str):
+        """用户说你记错了时，用正确说法覆盖旧记忆（旧的标记失效，不物理删除）。
+
+        Args:
+            hint(string): 记错的那件事的关键词/原句片段，用来定位旧的记忆
+            right_content(string): 正确的一句话事实
+        """
+        ident = memory_tooling.event_identity(event)
+        word = str(hint or "").strip()
+        right = str(right_content or "").strip()
+        if not ident["uid"] or len(word) < 2 or len(right) < 2:
+            return "关键词或正确内容太短，没有改。"
+        try:
+            result = await self.mem.correct(
+                self._bot_id({}, write=True), ident["uid"], word, right,
+                scope=ident["scope"], group_id=ident["group_id"],
+                platform=ident["platform"],
+            )
+        except Exception as exc:
+            logger.warning("[amo_data] correct 工具失败: %s" % exc)
+            return "纠正记忆失败（%s）。" % type(exc).__name__
+        if not (result or {}).get("ok"):
+            return "没改成：%s" % ((result or {}).get("reason") or "未知原因")
+        return "改好了：旧记忆 %d 条已失效，新说法记在 id=%s。" % (
+            int((result or {}).get("superseded") or 0), (result or {}).get("memory_id"))
+
+    async def memory_forget_tool(self, event, keyword: str, limit: int = 10):
+        """按关键词删掉记错的记忆（只在当前说话人的记忆里删，最多 10 条）。
+
+        Args:
+            keyword(string): 要忘掉的关键词/原句片段
+            limit(number): 最多删几条，1-10
+        """
+        ident = memory_tooling.event_identity(event)
+        word = str(keyword or "").strip()
+        if not ident["uid"] or len(word) < 2:
+            return "关键词太短或身份不明，没有删。"
+        bot_id = self._bot_id({}, write=True)
+        want = memory_tooling.clamp_limit(limit, 10, 10)
+        try:
+            items = await self.mem.recall(
+                bot_id, ident["uid"], word, limit=want,
+                scope=ident["scope"], group_id=ident["group_id"],
+                platform=ident["platform"],
+            )
+        except Exception as exc:
+            logger.warning("[amo_data] forget 工具检索失败: %s" % exc)
+            return "没找到要删的记忆（检索失败）。"
+        doomed = [int(row["id"]) for row in (items or [])
+                  if word in str(row.get("content") or "")]
+        removed = 0
+        for memory_id in doomed:
+            try:
+                if await self.mem.delete_memory(bot_id, memory_id):
+                    removed += 1
+            except Exception as exc:
+                logger.debug("[amo_data] 删除记忆 %s 失败: %r", memory_id, exc)
+        if not doomed:
+            return "没找到包含「%s」的记忆，没有删。" % word
+        return "删掉了 %d 条包含「%s」的记忆。" % (removed, word)
 
     def _resolve_data_dir(self) -> str:
         """AstrBot 给了 data_dir 就用它，否则退回 plugin_data/<插件名>。"""
@@ -306,8 +494,9 @@ class AmoDataPlugin(WebAPIMixin, Star):
 
     async def terminate(self) -> None:
         try:
-            if getattr(self, "_loop_task", None) is not None:
-                self._loop_task.cancel()
+            loop_task = getattr(self, "_loop_task", None)
+            if loop_task is not None:
+                loop_task.cancel()
         except Exception as exc:
             logger.debug("[amo_data] optional step failed: %r", exc)
         try:

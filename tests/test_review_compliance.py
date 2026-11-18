@@ -27,7 +27,8 @@ class LoggingRuleTests(unittest.TestCase):
 
 class AsyncBlockingTests(unittest.TestCase):
     def test_api_memories_offloads_recall(self):
-        body = read("core/web_handlers.py")
+        # Phase 13 P2：handler 按域拆到 core/handlers/，api_memories 在 memory.py
+        body = read("core/handlers/memory.py")
         start = body.index("async def api_memories")
         end = body.index("async def api_memory_save", start)
         segment = body[start:end]

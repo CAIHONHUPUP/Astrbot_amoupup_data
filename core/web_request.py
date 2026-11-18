@@ -9,7 +9,7 @@ try:
     from astrbot.api.web import request as _raw
 except Exception:  # pragma: no cover
     try:
-        from quart import request as _raw  # type: ignore
+        from quart import request as _raw
     except Exception:
         _raw = None
 

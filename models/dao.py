@@ -11,12 +11,21 @@ import logging
 logger = logging.getLogger("amo_data")
 
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from ..utils.text_process import _bot_filter, _from_vec, _to_vec, _now
+    from ..utils.text_process import _bot_filter, _from_vec, _norm_tags, _to_vec, _now
 except ImportError:  # 顶层导入（测试/脚本）
-    from utils.text_process import _bot_filter, _from_vec, _to_vec, _now
+    from utils.text_process import _bot_filter, _from_vec, _norm_tags, _to_vec, _now
+
+#: tags 只在「新值非空」时覆盖：不带 tags 的写入不会把旧标签清空。
+TAGS_KEEP_SQL = "tags=CASE WHEN ?<>'' THEN ? ELSE tags END"
+
+
+def _apply_tags_sql(tags: Any) -> Tuple[str, str]:
+    """返回 TAGS_KEEP_SQL 的两个占位参数（归一化后的 tags 展开成两遍）。"""
+    value = _norm_tags(tags)
+    return value, value
 
 
 class MemoryDao:
@@ -34,14 +43,16 @@ class MemoryDao:
     # ---------- 写 ----------
     def insert(self, bot_id: str, uid: str, pid: int, platform: str, scope: str,
                group_id: str, kind: str, subject: str, content: str, importance: float,
-               hit_count: int, created_at: int, last_hit_at: int, idem_key: str) -> int:
+               hit_count: int, created_at: int, last_hit_at: int, idem_key: str,
+               tags: str = "") -> int:
+        """写一条新记忆；tags 已归一化，空串表示无标签。"""
         with self.lock:
             cur = self.conn.execute(
                 "INSERT INTO memories(bot_id, uid, pid, platform, scope, group_id, kind, subject, content, "
-                "importance, hit_count, created_at, last_hit_at, idem_key) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "importance, hit_count, created_at, last_hit_at, idem_key, tags) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (bot_id, uid, int(pid), platform, scope, group_id, kind, subject, content,
-                 importance, hit_count, created_at, last_hit_at, idem_key),
+                 importance, hit_count, created_at, last_hit_at, idem_key, tags),
             )
             self.conn.commit()
         return int(cur.lastrowid or 0)
@@ -70,46 +81,53 @@ class MemoryDao:
                 (bot_id, uid, scope, group_id, idem_key),
             ).fetchone()
 
-    def revive(self, memory_id: int, importance: float, now: int, subject: str) -> None:
+    def revive(self, memory_id: int, importance: float, now: int, subject: str,
+               tags: str = "") -> None:
         """把归档/取代/过期的旧事实重新激活（用户又说了一遍同一件事）。"""
         with self.lock:
             self.conn.execute(
                 "UPDATE memories SET status='active', superseded_by=0, "
                 "importance=MAX(importance, ?), last_hit_at=?, "
                 "merged_count=COALESCE(merged_count,1)+1, "
-                "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
-                (importance, now, subject, int(memory_id)),
+                "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END, "
+                + TAGS_KEEP_SQL + " WHERE id=?",
+                (importance, now, subject) + _apply_tags_sql(tags) + (int(memory_id),),
             )
             self.conn.commit()
 
-    def touch(self, memory_id: int, importance: float, now: int, subject: str) -> bool:
+    def touch(self, memory_id: int, importance: float, now: int, subject: str,
+              tags: str = "") -> bool:
         """同一件事又说一遍：抬重要度、刷新时间、合并计数 +1，不新增行。"""
         with self.lock:
             cur = self.conn.execute(
                 "UPDATE memories SET importance=MAX(importance, ?), last_hit_at=?, "
                 "merged_count=merged_count+1, "
-                "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
-                (importance, now, subject, int(memory_id)),
+                "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END, "
+                + TAGS_KEEP_SQL + " WHERE id=?",
+                (importance, now, subject) + _apply_tags_sql(tags) + (int(memory_id),),
             )
             self.conn.commit()
             return bool(cur.rowcount)
 
     def merge_content(self, memory_id: int, content: str, importance: float, now: int,
-                      subject: str, keep_existing: bool) -> None:
+                      subject: str, keep_existing: bool, tags: str = "") -> None:
         """近重复（换标点/语序）：把正文并到已有那条上。"""
         with self.lock:
             if keep_existing:
                 self.conn.execute(
                     "UPDATE memories SET importance=MAX(importance, ?), "
-                    "last_hit_at=?, merged_count=merged_count+1 WHERE id=?",
-                    (importance, now, int(memory_id)),
+                    "last_hit_at=?, merged_count=merged_count+1, "
+                    + TAGS_KEEP_SQL + " WHERE id=?",
+                    (importance, now) + _apply_tags_sql(tags) + (int(memory_id),),
                 )
             else:
                 self.conn.execute(
                     "UPDATE memories SET content=?, importance=MAX(importance, ?), "
                     "last_hit_at=?, merged_count=merged_count+1, "
-                    "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END WHERE id=?",
-                    (content, importance, now, subject, int(memory_id)),
+                    "subject=CASE WHEN ?='bot' THEN 'bot' ELSE subject END, "
+                    + TAGS_KEEP_SQL + " WHERE id=?",
+                    (content, importance, now, subject) + _apply_tags_sql(tags)
+                    + (int(memory_id),),
                 )
             self.conn.commit()
 
@@ -177,7 +195,7 @@ class MemoryDao:
         with self.lock:
             sql = (
                 "SELECT id, uid, pid, platform, content, kind, subject, importance, created_at, "
-                "hit_count, scope, group_id "
+                "hit_count, scope, group_id, COALESCE(tags,'') AS tags "
                 "FROM memories WHERE 1=1" + where
             )
             if pid or uid:
@@ -205,6 +223,150 @@ class MemoryDao:
                 sql, list(params) + [float(max_importance), int(cutoff)]
             ).fetchall()
         return [int(row["id"]) for row in rows]
+
+    def archive_noise_candidates(self, where: str, params: List[Any], kinds: List[str],
+                                 max_importance: float, cutoff: int) -> List[int]:
+        """类型化 TTL：流水账/机器记忆用更短的归档期限（它们不该长期占召回）。"""
+        if not kinds:
+            return []
+        marks = ",".join("?" for _ in kinds)
+        sql = ("SELECT id FROM memories WHERE 1=1" + where +
+               " AND COALESCE(status,'active')='active'"
+               " AND COALESCE(kind,'') IN (" + marks + ")"
+               " AND importance<=? AND COALESCE(hit_count,0)<2"
+               " AND COALESCE(last_hit_at,created_at)<?")
+        try:
+            with self.lock:
+                rows = self.conn.execute(
+                    sql, list(params) + list(kinds) + [float(max_importance), int(cutoff)]
+                ).fetchall()
+            return [int(row["id"]) for row in rows]
+        except Exception:
+            return []
+
+    def status_counts(self, bot_id: str) -> Dict[str, int]:
+        """各状态的条数（面板/接口用）；只读，不扫正文。"""
+        out: Dict[str, int] = {}
+        try:
+            with self.lock:
+                rows = self.conn.execute(
+                    "SELECT COALESCE(status,'active') AS s, COUNT(*) AS n "
+                    "FROM memories WHERE bot_id=? GROUP BY s",
+                    (str(bot_id),),
+                ).fetchall()
+            for row in rows:
+                out[str(row["s"])] = int(row["n"])
+        except Exception:
+            return {}
+        return out
+
+    def purge_expired(self, bot_id: str, before: int, limit: int = 500) -> int:
+        """物理删除「过期且很久没被想起」的记忆（默认关闭，配置开了才走）。
+
+        连带清掉向量和实体链接；entities 本身留着（可能被别的记忆引用）。
+        """
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id FROM memories WHERE bot_id=? AND COALESCE(status,'')='expired' "
+                "AND COALESCE(last_hit_at,created_at)<? LIMIT ?",
+                (str(bot_id), int(before), max(1, int(limit))),
+            ).fetchall()
+            ids = [int(row["id"]) for row in rows]
+            if not ids:
+                return 0
+            marks = ",".join("?" for _ in ids)
+            for sql in (
+                "DELETE FROM memory_vec WHERE memory_id IN (" + marks + ")",
+                "DELETE FROM memory_entities WHERE memory_id IN (" + marks + ")",
+                "DELETE FROM memories WHERE id IN (" + marks + ")",
+            ):
+                try:
+                    self.conn.execute(sql, ids)
+                except sqlite3.OperationalError:
+                    continue  # 向量/图谱表可能还没建
+            self.conn.commit()
+        return len(ids)
+
+    def lifecycle_rows(self, bot_id: str, limit: int = 5000) -> List[sqlite3.Row]:
+        """休眠/过期扫描：只取 active 行，按 id 倒序（新的先看）。"""
+        with self.lock:
+            return self.conn.execute(
+                "SELECT id, kind, importance, hit_count, created_at, last_hit_at "
+                "FROM memories WHERE bot_id=? AND COALESCE(status,'active')='active' "
+                "ORDER BY id DESC LIMIT ?",
+                (str(bot_id), max(1, int(limit))),
+            ).fetchall()
+
+    def set_status(self, ids: List[int], status: str, bot_id: str = "") -> int:
+        """批量改状态（休眠/过期/复活都走这里）；给 bot_id 时只动名下的行。"""
+        if not ids:
+            return 0
+        sql = "UPDATE memories SET status=? WHERE id=?"
+        params: List[tuple] = []
+        if bot_id:
+            sql += " AND bot_id=?"
+            params = [(str(status), int(memory_id), str(bot_id)) for memory_id in ids]
+        else:
+            params = [(str(status), int(memory_id)) for memory_id in ids]
+        with self.lock:
+            self.conn.executemany(sql, params)
+            self.conn.commit()
+        return len(ids)
+
+    def revive_many(self, ids: List[int]) -> int:
+        """唤醒休眠记忆：回到 active，并刷新 last_hit_at（这次确实被想起来了）。
+
+        注意：DAO 里已有 revive(memory_id, importance, now, subject)（写路径复活旧事实），
+        这里换个名字，别把两套语义踩在一起。
+        """
+        if not ids:
+            return 0
+        now = _now()
+        with self.lock:
+            self.conn.executemany(
+                "UPDATE memories SET status='active', last_hit_at=? WHERE id=?",
+                [(now, int(memory_id)) for memory_id in ids],
+            )
+            self.conn.commit()
+        return len(ids)
+
+    def count_superseded_by(self, new_id: int) -> int:
+        """这条纠正一共让多少条旧记忆失效（写路径的负状态覆盖也算）。"""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM memories "
+                "WHERE superseded_by=? AND COALESCE(status,'')='superseded'",
+                (int(new_id),),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def find_active_like(self, bot_id: str, uid: str, text: str,
+                         exclude: int = 0, limit: int = 5) -> List[int]:
+        """纠正用：找这个人的、内容包含 hint 的活跃记忆。"""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id FROM memories WHERE bot_id=? AND uid=? "
+                "AND COALESCE(status,'active')='active' AND id<>? AND content LIKE ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (str(bot_id), str(uid), int(exclude), "%" + str(text) + "%", int(limit)),
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
+
+    def supersede_many(self, ids: List[int], new_id: int) -> int:
+        """把记错的旧记忆标成 superseded，并指向纠正后的那条。
+
+        注意：DAO 里已有一个 supersede(new_id, old_ids)（写路径的负状态覆盖），
+        这里不复用它的参数顺序，免得两套语义互相踩。
+        """
+        if not ids:
+            return 0
+        with self.lock:
+            self.conn.executemany(
+                "UPDATE memories SET status='superseded', superseded_by=? WHERE id=?",
+                [(int(new_id), int(memory_id)) for memory_id in ids],
+            )
+            self.conn.commit()
+        return len(ids)
 
     def mark_archived(self, ids: List[int], bot_id: str = "", uid: str = "") -> int:
         """标记 archived；给了 bot_id/uid 时只动名下的行，别人的记忆一条都不许碰。"""
@@ -371,6 +533,34 @@ class MemoryDao:
         except Exception:
             return {}
         return out
+
+    def vec_state(self) -> Tuple[int, int, int]:
+        """向量索引快照指纹：(条数, 最大 memory_id, 最大 updated_at)。"""
+        try:
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT COUNT(*) AS n, COALESCE(MAX(memory_id),0) AS mid, "
+                    "COALESCE(MAX(updated_at),0) AS ts FROM memory_vec"
+                ).fetchone()
+            return (int(row["n"]), int(row["mid"]), int(row["ts"]))
+        except Exception:
+            return (0, 0, 0)
+
+    def load_all_vecs(self) -> Dict[int, List[float]]:
+        """全量向量（候选层建索引用；上层会缓存成矩阵，不是每轮都读库）。"""
+        found: Dict[int, List[float]] = {}
+        try:
+            with self.lock:
+                rows = self.conn.execute(
+                    "SELECT memory_id, dim, vec FROM memory_vec"
+                ).fetchall()
+            for row in rows:
+                vec = _to_vec(row["vec"], int(row["dim"] or 0))
+                if vec:
+                    found[int(row["memory_id"])] = vec
+        except Exception:
+            return {}
+        return found
 
     def missing_vecs(self, limit: int) -> List[sqlite3.Row]:
         with self.lock:

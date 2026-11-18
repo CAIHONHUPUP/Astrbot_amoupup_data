@@ -40,6 +40,12 @@
     "description": "运行日志保留天数",
     "default": 7
   },
+  "memory_tools_enabled": {
+    "type": "bool",
+    "description": "给主模型注册记忆工具",
+    "hint": "打开后她可以在拿不准时主动查记忆（recall_long_term_memory）、把重要的事记下来（memorize_long_term_memory）、删掉记错的（forget_long_term_memory）。关掉就只有被动注入，不会额外调用工具。",
+    "default": true
+  },
   "min_importance": {
     "type": "float",
     "description": "记忆默认重要度",
@@ -63,6 +69,150 @@
     "hint": "和关键词命中那一路合并成候选池；600 在几千条记忆时够用，调大更全但更慢。",
     "default": 600
   },
+  "recall_vector_candidates": {
+    "type": "int",
+    "description": "全库向量候选条数",
+    "hint": "每轮召回先在全库向量里找最像的 N 条，再和关键词、最近活跃两路合并。0=关掉这一路。以前向量只给已入池的行打分，库一大词面不重合的记忆永远进不了候选。",
+    "default": 50
+  },
+  "recall_token_or": {
+    "type": "bool",
+    "description": "拆词 OR 粗筛",
+    "hint": "整句 LIKE 对自然语言几乎无效，打开后按二元组拆词 OR 匹配，跨词序（猫/团子）也能进候选。",
+    "default": true
+  },
+  "recall_vec_gate": {
+    "type": "string",
+    "description": "纯语义命中闸模式",
+    "hint": "rank=只看余弦和 top 差多少（推荐，bge-m3 中文余弦普遍偏平）；strict=旧行为（绝对 0.82 且 top 领先第二名）。",
+    "default": "rank"
+  },
+  "recall_vec_gate_topk": {
+    "type": "int",
+    "description": "rank 模式放行 top 几名",
+    "default": 2
+  },
+  "recall_vec_gate_floor": {
+    "type": "float",
+    "description": "rank 模式余弦底线",
+    "hint": "低于这个余弦就算排第一也不放行，防止「谁都不像」时硬推一条。真实库 A/B：0.80 时不解低于旧版的弃答率（0.60 会多召回也多点噪声）。",
+    "default": 0.8
+  },
+  "recall_vec_gate_window": {
+    "type": "float",
+    "description": "rank 模式与 top 的最大差距",
+    "default": 0.08
+  },
+  "recall_multi_query": {
+    "type": "bool",
+    "description": "多查询召回（剥壳/拆词变体）",
+    "hint": "「你还记得…吗」这类问句会剥出核心句和拆词变体各粗筛一次，再合并候选。",
+    "default": true
+  },
+  "recall_entity_tags": {
+    "type": "bool",
+    "description": "写入时挂人物实体标签",
+    "hint": "正文里出现已知人物的名字时追加 entity:<名字>，召回时按名字也能捞到「他今天…」这种没有名字的回忆。",
+    "default": true
+  },
+  "recall_rerank_enabled": {
+    "type": "bool",
+    "description": "二阶段 LLM 重排",
+    "hint": "召回后把 top-20 交给当前模型挑一次（只重排/丢弃，不新增记忆）；超时或失败自动原样返回。默认关，因为每轮会多一次小模型调用。",
+    "default": false
+  },
+  "recall_rerank_candidates": {
+    "type": "int",
+    "description": "重排候选条数",
+    "default": 20
+  },
+  "recall_rerank_timeout": {
+    "type": "float",
+    "description": "重排超时（秒）",
+    "default": 8.0
+  },
+  "recall_entity_graph": {
+    "type": "bool",
+    "description": "通用记忆图谱",
+    "hint": "写记忆时抽名词实体并给同一条记忆里的实体连边；召回时按实体命中 + 一跳共现取记忆。纯规则，不调模型。",
+    "default": true
+  },
+  "recall_entity_graph_memories": {
+    "type": "int",
+    "description": "实体图谱候选条数",
+    "default": 10
+  },
+  "recall_revive_dormant": {
+    "type": "bool",
+    "description": "命中休眠记忆时复活",
+    "hint": "休眠只是退出常规召回；被关键词强命中时会捞回来并标回 active（想起来一次就活一次）。",
+    "default": true
+  },
+  "lifecycle_enabled": {
+    "type": "bool",
+    "description": "按类型的休眠/过期",
+    "hint": "流水账 30 天、摘要 180 天没人提就休眠；一年前的流水标过期（都不删正文）。每天维护跑一次。",
+    "default": true
+  },
+  "lifecycle_noise_days": {
+    "type": "int",
+    "description": "流水账休眠天数",
+    "hint": "0=用内置表（活动 30 / 事件 45 / 导入 60）。",
+    "default": 30
+  },
+  "lifecycle_summary_days": {
+    "type": "int",
+    "description": "摘要休眠天数",
+    "default": 180
+  },
+  "lifecycle_expire_days": {
+    "type": "int",
+    "description": "流水账过期天数",
+    "default": 365
+  },
+  "lifecycle_purge_expired_days": {
+    "type": "int",
+    "description": "过期后物理删除（天）",
+    "hint": "0=只标记 expired、正文不删；比如 90=过期后再 90 天且没被想起才真删（连带向量/实体链接）。",
+    "default": 0
+  },
+  "lifecycle_consolidate_days": {
+    "type": "int",
+    "description": "旧流水巩固起始天数",
+    "default": 7
+  },
+  "lifecycle_consolidate_min": {
+    "type": "int",
+    "description": "巩固最少条数",
+    "default": 3
+  },
+  "semantic_consolidation_enabled": {
+    "type": "bool",
+    "description": "跨天同主题语义巩固",
+    "hint": "把「同一件事」的跨天记忆交给一次小模型合并成一句事实（覆盖原文关键信息才算数），每天最多几组；拿不到模型就跳过。",
+    "default": true
+  },
+  "semantic_consolidation_max_groups": {
+    "type": "int",
+    "description": "每天最多巩固几组",
+    "default": 3
+  },
+  "semantic_consolidation_timeout": {
+    "type": "float",
+    "description": "单组超时（秒）",
+    "default": 20.0
+  },
+  "recall_graph_route": {
+    "type": "bool",
+    "description": "实体/关系路召回",
+    "hint": "查询里出现人物名字、别名或关系词（我表哥/我妈）时，按这个人的 pid 把相关记忆拉进候选；人物档案和关系表本来就有的数据，不额外花模型调用。",
+    "default": true
+  },
+  "recall_graph_candidates": {
+    "type": "int",
+    "description": "实体路候选条数",
+    "default": 10
+  },
   "recall_min_matched_terms": {
     "type": "int",
     "description": "最少命中几个关键词",
@@ -80,6 +230,18 @@
     "description": "重要度随时间的软化比例",
     "hint": "0=重要度不随时间变；0.1=重要度也有 10% 跟着新鲜度走。",
     "default": 0.1
+  },
+  "chain_trace": {
+    "type": "bool",
+    "description": "链路追踪（[chain] 日志）",
+    "hint": "召回/写入每一步打一行 [chain] trace=… step=… ok (Nms)，排障用；关掉完全静默。",
+    "default": true
+  },
+  "config_watch": {
+    "type": "bool",
+    "description": "配置热更新",
+    "hint": "面板保存配置后，下一次 /status、/recall、/remember 自动生效，不用重启插件；解析失败保留旧配置。",
+    "default": true
   },
   "auto_dedupe": {
     "type": "bool",

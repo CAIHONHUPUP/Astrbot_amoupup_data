@@ -19,25 +19,8 @@ astrbot_stub.install()
 import main as data_main  # noqa: E402
 
 
-class _FakeDB:
-    def __init__(self):
-        self.deleted = []
-
-    def delete_profile(self, uid):
-        self.deleted.append(uid)
-
-
-class _FakeAmo:
-    def __init__(self):
-        self.db = _FakeDB()
-
-
-class _Ctx:
-    def __init__(self, amo):
-        self.amo = amo
-
-    def get_registered_star(self, name):
-        return types.SimpleNamespace(star_cls=self.amo)
+# Phase 13 P2：陪伴侧桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import AmoContext as _Ctx, AmoStub as _FakeAmo  # noqa: E402
 
 
 def _plugin(ctx):
@@ -69,7 +52,8 @@ class ForgetInAmoTests(unittest.TestCase):
 
 class HandlerWiringTests(unittest.TestCase):
     def test_delete_handler_calls_forget(self):
-        src = open(os.path.join(_ROOT, "core", "web_handlers.py"), encoding="utf-8").read()
+        # Phase 13 P2：handler 按域拆到 core/handlers/，删画像在 profiles.py
+        src = open(os.path.join(_ROOT, "core", "handlers", "profiles.py"), encoding="utf-8").read()
         body = src[src.index("async def api_profile_delete"):src.index("async def api_persons")]
         self.assertIn("_forget_in_amo(uid)", body)
 

@@ -16,27 +16,17 @@ astrbot_stub.install()
 
 from main import AmoDataPlugin  # noqa: E402
 
-
-class FakeMem:
-    async def stats(self, bot):
-        assert bot == ""
-        return {"memories": 7, "memories_active": 5, "profiles": 2,
-                "persons": 3, "messages": 9, "relations": 1}
-
+from plugin_fakes import MemStatsFakeMem as FakeMem  # noqa: E402
 
 class BoomMem:
     async def stats(self, bot):
         raise RuntimeError("db locked")
 
-
-class FakeEvent:
-    def plain_result(self, text):
-        return text
-
+# Phase 13 P2：事件桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import StubEvent as FakeEvent  # noqa: E402
 
 async def _collect(plugin):
     return [item async for item in plugin.mem_stats_cmd(FakeEvent())]
-
 
 def _plugin(mem):
     plugin = object.__new__(AmoDataPlugin)
@@ -44,13 +34,11 @@ def _plugin(mem):
     plugin._bot_id = lambda *a, **k: ""
     return plugin
 
-
 def test_mem_stats_formats_counts():
     out = asyncio.run(_collect(_plugin(FakeMem())))
     assert len(out) == 1
     for frag in ("记忆 7 条", "活跃 5", "画像 2", "人物 3", "消息 9", "关系 1"):
         assert frag in out[0], out[0]
-
 
 def test_mem_stats_never_raises():
     out = asyncio.run(_collect(_plugin(BoomMem())))

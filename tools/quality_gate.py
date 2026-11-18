@@ -20,7 +20,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: 面板/外部会调用的 api_* 处理器数量；增删接口时同步这里
-ROUTE_COUNT = 34
+ROUTE_COUNT = 36
 
 
 def check_schema():
@@ -38,12 +38,24 @@ def check_compile():
     return "compile ok"
 
 
+def _route_sources():
+    """所有可能定义 api_* 处理器的源码：core/ 递归 + main.py。
+
+    3.1 之后处理器从 main.py 搬到 core/web_handlers.py，Phase 13 P2 又按域拆到
+    core/handlers/*.py；这里递归扫 core/，拆文件不会再让路由数变成 0。
+    """
+    paths = []
+    core_dir = os.path.join(ROOT, "core")
+    for base, dirs, names in os.walk(core_dir):
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+        paths.extend(os.path.join(base, name) for name in sorted(names) if name.endswith(".py"))
+    paths.append(os.path.join(ROOT, "main.py"))
+    return paths
+
+
 def check_routes():
-    # 3.1 之后 api_* 处理器搬到了 core/web_handlers.py；只扫 main.py 会数到 0，
-    # 质量门就永远红着、然后被大家忽略（这正是 lint 漏检 P1 的原因）。
     count = 0
-    for rel in ("core/web_handlers.py", "main.py"):
-        path = os.path.join(ROOT, rel)
+    for path in _route_sources():
         if not os.path.exists(path):
             continue
         with open(path, encoding="utf-8") as fh:
@@ -369,13 +381,24 @@ def check_tests():
     return "tests ok"
 
 
+def check_mypy_strict():
+    """严格 mypy（--check-untyped-defs）只降不升：超过基线即红。"""
+    script = os.path.join(ROOT, "tools", "mypy_strict.py")
+    result = subprocess.run([sys.executable, script], cwd=ROOT, capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", timeout=900)
+    tail = ((result.stdout or "") + (result.stderr or "")).strip().splitlines()
+    assert result.returncode == 0, "严格 mypy 超过基线：\n" + "\n".join(tail[-4:])
+    return tail[-1] if tail else "strict mypy ok"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fast", action="store_true", help="跳过全量测试")
     args = parser.parse_args()
     print("[gate] clean_pycache", clean_pycache())
     checks = [check_schema, check_compile, check_routes, check_dashboard_js, check_pyflakes,
-              check_size, check_function_sizes, check_silent_except, check_async_blocking]
+              check_size, check_function_sizes, check_silent_except, check_async_blocking,
+              check_mypy_strict]
     if not args.fast:
         checks.append(check_tests)
     for check in checks:

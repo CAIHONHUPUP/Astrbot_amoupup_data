@@ -1,29 +1,40 @@
 # -*- coding: utf-8 -*-
-"""services/memory_engine.py —— 写记忆：清洗、幂等去重、近重复合并、取代、向量、来源回填。
+"""services/memory_engine.py —— 写记忆：幂等去重、近重复合并、取代、向量、来源回填。
 
-判定都在这一层；SQL 在 models/dao.py。
+写入前的唯一校验/归一化入口是 services/memory_schema.prepare_write（kind/scope/
+importance/idem_key/tags/subject/text），本层不再自己拼一套；SQL 在 models/dao.py。
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import sqlite3
 import threading
 import time
 import urllib.request
 from typing import Any, Dict, List, Optional
 
 try:
+    from . import chain as _chain
+except ImportError:  # 顶层导入（测试/脚本）
+    from services import chain as _chain
+
+try:
     from ..models.dao import MemoryDao
-    from ..services import fact_dedupe
+    from ..services import (entity_graph, entity_tag, fact_dedupe, lifecycle, memory_schema,
+                            semantic_consolidation)
     from ..utils.text_process import (
-        STOP_BIGRAMS, _clean, _jaccard, _now, _norm_key, _recall_tokens, _slot_facts, logger,
+        STOP_BIGRAMS, _clean, _jaccard, _now, _recall_tokens,
+        _slot_facts, logger,
     )
 except ImportError:  # 顶层导入（测试/脚本）
     from models.dao import MemoryDao
-    from services import fact_dedupe
+    from services import (entity_graph, entity_tag, fact_dedupe, lifecycle, memory_schema,
+                          semantic_consolidation)
     from utils.text_process import (
-        STOP_BIGRAMS, _clean, _jaccard, _now, _norm_key, _recall_tokens, _slot_facts, logger,
+        STOP_BIGRAMS, _clean, _jaccard, _now, _recall_tokens,
+        _slot_facts, logger,
     )
 
 
@@ -44,6 +55,8 @@ class MemoryEngine:
         self._emb_thread: Optional[threading.Thread] = None
         self._emb_total = 0
         self._emb_failed = 0
+        # 人物名字表缓存（写入时打 entity 标签用）：bot_id -> (ts, names)
+        self._entity_cache: Dict[str, Any] = {}
         self._emb_warned = False
         if self.setting("embedding_enabled"):
             self._ensure_emb_worker()
@@ -94,6 +107,112 @@ class MemoryEngine:
             finally:
                 with self._emb_pending_lock:
                     self._emb_pending.discard(int(memory_id))
+
+    def _lifecycle_overrides(self) -> Dict[str, Any]:
+        """面板配置 → lifecycle.plan 的覆盖项（0/空 = 不覆盖，用内置表）。"""
+        def _num(key, default):
+            try:
+                value = float(self.setting(key, default) or 0)
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+        return {
+            "noise_days": _num("lifecycle_noise_days", 30),
+            "summary_days": _num("lifecycle_summary_days", 180),
+            "expire_days": _num("lifecycle_expire_days", 365),
+        }
+
+    def preview_lifecycle(self, bot_id: str) -> Dict[str, Any]:
+        """dry-run：按当前 TTL 算会休眠/过期多少条，取样给面板看。"""
+        rows = [dict(row) for row in self.dao.lifecycle_rows(bot_id, 5000)]
+        dormant, expired = lifecycle.plan(rows, _now(), self._lifecycle_overrides())
+        by_id = {int(row["id"]): row for row in rows}
+        sample = []
+        for memory_id in (dormant + expired)[:5]:
+            row = by_id.get(int(memory_id)) or {}
+            sample.append({
+                "id": int(memory_id),
+                "kind": str(row.get("kind") or ""),
+                "days": round((_now() - int(row.get("last_hit_at") or row.get("created_at") or _now())) / 86400.0, 1),
+                "content": str(row.get("content") or "")[:60],
+            })
+        return {"candidates": len(rows), "dormant": len(dormant), "expired": len(expired),
+                "sample": sample, "settings": self._lifecycle_overrides(),
+                "counts": self.dao.status_counts(bot_id)}
+
+    def semantic_clusters(self, bot_id: str, limit: int = 2000) -> List[Dict[str, Any]]:
+        """跨天同主题候选簇（纯规则聚类，不调模型）。"""
+        kinds = sorted(semantic_consolidation.MERGEABLE_KINDS)
+        marks = ",".join("?" for _ in kinds)
+        with self.dao.lock:
+            rows = self.dao.conn.execute(
+                "SELECT id, uid, scope, group_id, kind, content, importance, created_at "
+                "FROM memories WHERE bot_id=? AND COALESCE(status,'active')='active' "
+                "AND kind IN (" + marks + ") ORDER BY id DESC LIMIT ?",
+                [str(bot_id)] + kinds + [max(1, int(limit))],
+            ).fetchall()
+        return semantic_consolidation.cluster([dict(row) for row in rows])
+
+    def apply_semantic_merge(self, keep_id: int, merged: str, ids: List[int]) -> int:
+        """把一簇合成的那句话写回 keep，其余标 merged（不删正文）。"""
+        others = [int(i) for i in ids if int(i) != int(keep_id)]
+        if not others:
+            return 0
+        row = self.dao.conn.execute(
+            "SELECT MAX(importance) AS top FROM memories WHERE id IN (" + ",".join("?" for _ in ids) + ")",
+            [int(i) for i in ids],
+        ).fetchone()
+        importance = float(row["top"] or 0.6) if row else 0.6
+        self.dao.merge_summary(int(keep_id), str(merged), len(others), importance)
+        self.dao.mark_merged(int(keep_id), others)
+        return len(others)
+
+    def run_lifecycle(self, bot_id: str, apply: bool = True) -> Dict[str, Any]:
+        """按 kind 的 TTL 把旧流水标休眠/过期；开了清理就把过期且久未想起的删掉。"""
+        rows = [dict(row) for row in self.dao.lifecycle_rows(bot_id, 5000)]
+        dormant, expired = lifecycle.plan(rows, _now(), self._lifecycle_overrides())
+        purged = 0
+        if apply:
+            if dormant:
+                self.dao.set_status(dormant, "dormant", bot_id)
+            if expired:
+                self.dao.set_status(expired, "expired", bot_id)
+            try:
+                keep_days = float(self.setting("lifecycle_purge_expired_days", 0) or 0)
+            except (TypeError, ValueError):
+                keep_days = 0.0
+            if keep_days > 0:
+                purged = self.dao.purge_expired(bot_id, int(_now() - keep_days * 86400))
+        return {"candidates": len(rows), "dormant": len(dormant), "expired": len(expired),
+                "purged": purged}
+
+    def _entity_names(self, bot_id: str) -> List[str]:
+        """已知人物名字（persons + person_links），缓存 5 分钟，别每条写入都查库。"""
+        key = str(bot_id)
+        now = time.time()
+        cached = self._entity_cache.get(key)
+        if cached and now - float(cached[0]) < 300.0:
+            return list(cached[1])
+        names: List[str] = []
+        try:
+            with self.dao.lock:
+                rows = self.dao.conn.execute(
+                    "SELECT name FROM persons WHERE bot_id=? AND COALESCE(name,'')<>'' "
+                    "UNION SELECT name FROM person_links WHERE bot_id=? "
+                    "AND COALESCE(name,'')<>''",
+                    (key, key),
+                ).fetchall()
+            names = [str(row["name"]).strip() for row in rows if str(row["name"]).strip()]
+        except Exception:
+            names = []
+        self._entity_cache[key] = (now, names)
+        return names
+
+    def _entity_tags(self, bot_id: str, text: str, tags: str) -> str:
+        try:
+            return entity_tag.apply_entity_tags(text, tags, self._entity_names(bot_id))
+        except Exception:
+            return tags
 
     def _enqueue_embedding(self, memory_id: int, text: str) -> None:
         if not self.setting("embedding_enabled") or not memory_id or not text:
@@ -170,6 +289,37 @@ class MemoryEngine:
     def _load_vecs(self, ids: List[int]) -> Dict[int, List[float]]:
         return self.dao.load_vecs(ids)
 
+    def correct(self, bot_id: str, uid: str, hint: str, right_content: str,
+                scope: str = "private", group_id: str = "",
+                platform: str = "") -> Dict[str, Any]:
+        """他说「记错了」：把 hint 命中的旧记忆标 superseded，再写正确版本。
+
+        先写新的（idem_key 用内容指纹，绕开近似去重），写成功才动旧的：
+        写失败就一条都不改，避免把记忆删成空白。
+        """
+        hint_text = str(hint or "").strip()
+        right = str(right_content or "").strip()
+        if len(hint_text) < 2 or len(right) < 2:
+            return {"ok": False, "reason": "hint 和正确内容都要至少 2 个字"}
+        try:
+            from ..utils.text_process import _norm_key
+        except ImportError:
+            from utils.text_process import _norm_key
+        saved = self.remember(
+            bot_id, uid, right, kind="fact", importance=0.85, scope=scope,
+            group_id=group_id, platform=platform, idem_key=_norm_key(right),
+        )
+        if not saved.get("ok"):
+            return {"ok": False, "reason": saved.get("reason") or "写入失败"}
+        new_id = int(saved.get("memory_id") or 0)
+        old_ids = self.dao.find_active_like(bot_id, uid, hint_text, exclude=new_id, limit=5)
+        if old_ids:
+            self.dao.supersede_many(old_ids, new_id)
+        # 写路径本身也会做负状态覆盖，所以统一数「指向新 id 的失效条数」
+        superseded = self.dao.count_superseded_by(new_id)
+        return {"ok": True, "memory_id": new_id, "superseded": superseded,
+                "superseded_ids": old_ids}
+
     def backfill_embeddings(self, limit: int = 200) -> int:
         """给还没有向量的记忆排队补向量（交给后台线程，不阻塞聊天）。"""
         if not self.setting("embedding_enabled"):
@@ -204,19 +354,36 @@ class MemoryEngine:
                  importance: float = 0.5, scope: str = "private", group_id: str = "",
                  subject: str = "user", platform: str = "", idem_key: str = "",
                  created_at: Optional[int] = None, last_hit_at: Optional[int] = None,
-                 hit_count: int = 0, keep_existing_content: bool = False) -> Dict[str, Any]:
-        text = _clean(content)
-        try:
-            from .fact_guard import sanitize_memory_text
-        except ImportError:
-            from services.fact_guard import sanitize_memory_text
-        if str(kind or "") in ("event", "activity", "diary", "conversation_summary", "daily_digest"):
-            text = sanitize_memory_text(text)
-        if not text:
-            return {"ok": False, "reason": "empty"}
-        kind = _clean(kind, 32) or "fact"
-        static = fact_dedupe.is_static_kind(kind)
-        fact = fact_dedupe.fact_key(text) if static else ""
+                 hit_count: int = 0, keep_existing_content: bool = False,
+                 tags: str = "") -> Dict[str, Any]:
+        now = _now()
+        trace = _chain.new_chain("remember", bool(self.setting("chain_trace", True)))
+        prepared = memory_schema.prepare_write(
+            content=content, kind=kind, importance=importance, scope=scope,
+            group_id=group_id, subject=subject, idem_key=idem_key, tags=tags,
+            auto_dedupe=bool(self.setting("auto_dedupe", True)),
+            created_at=created_at, last_hit_at=last_hit_at, hit_count=hit_count,
+            now=now,
+        )
+        if not prepared["ok"]:
+            trace.fail("prepare", prepared["reason"])
+            return {"ok": False, "reason": prepared["reason"]}
+        trace.step("prepare", "kind=%s" % prepared["kind"])
+        text = prepared["text"]
+        kind = prepared["kind"]
+        static = prepared["static"]
+        fact = prepared["fact"]
+        importance = prepared["importance"]
+        scope = prepared["scope"]
+        group_id = prepared["group_id"]
+        subject = prepared["subject"]
+        idem_key = prepared["idem_key"]
+        tags = prepared["tags"]
+        if self.setting("recall_entity_tags", True):
+            tags = self._entity_tags(bot_id, text, tags)
+        created_at = prepared["created_at"]
+        last_hit_at = prepared["last_hit_at"]
+        hit_count = prepared["hit_count"]
         bot_id, uid = str(bot_id), str(uid)
         platform = str(platform or "").strip()
         pid = 0
@@ -232,33 +399,44 @@ class MemoryEngine:
                     pid = self.persons.pid_for_uid(bot_id, uid)
         except Exception:
             pid = 0
-        scope = "group" if str(scope) == "group" else "private"
-        group_id = str(group_id or "") if scope == "group" else ""
-        meta = _norm_meta(self, importance, created_at, last_hit_at, hit_count,
-                          idem_key, subject, static, fact, text)
-        importance = meta["importance"]
-        created_at = meta["created_at"]
-        last_hit_at = meta["last_hit_at"]
-        hit_count = meta["hit_count"]
-        idem_key = meta["idem_key"]
-        subject = meta["subject"]
 
-        now = _now()
         merged = _try_merge(self, bot_id, uid, scope, group_id, text, importance, now,
-                            subject, fact, static, keep_existing_content, idem_key)
+                            subject, fact, static, keep_existing_content, idem_key, tags)
         if merged is not None:
+            trace.step("merge", "id=%s" % merged.get("memory_id"))
+            trace.done()
             return merged
 
-        memory_id = self.dao.insert(
-            bot_id, uid, pid, platform, scope, group_id, _clean(kind, 32) or "fact", subject,
-            text, importance, hit_count, created_at, last_hit_at, idem_key,
-        )
+        try:
+            memory_id = self.dao.insert(
+                bot_id, uid, pid, platform, scope, group_id, _clean(kind, 32) or "fact",
+                subject, text, importance, hit_count, created_at, last_hit_at, idem_key, tags,
+            )
+        except sqlite3.IntegrityError:
+            # 竞态：同一 idem 刚被别的线程写进来，唯一索引挡住了 INSERT。回头再走一次
+            # 合并/复活路径，绝不能把这条记忆静默丢掉（旧逻辑会让整条写入失败）。
+            merged = _try_merge(self, bot_id, uid, scope, group_id, text, importance, now,
+                                subject, fact, static, keep_existing_content, idem_key, tags)
+            if merged is not None:
+                trace.step("merge_race", "id=%s" % merged.get("memory_id"))
+                trace.done()
+                return merged
+            raise
         if self.setting("identity_debug", True):
             logger.info(
                 "[MEMORY_DEBUG] person_id=%s source_platform=%s hit=%s reason=write:%s",
                 pid, platform or "unknown", 0, str(kind or "fact"),
             )
+        trace.step("insert", "id=%d" % memory_id)
         self._enqueue_embedding(memory_id, text)
+        trace.step("vector_queue")
+        if self.setting("recall_entity_graph", True):
+            try:
+                entity_graph.link_memory(self.dao, bot_id, memory_id, text,
+                                         self._entity_names(bot_id))
+                trace.step("graph")
+            except Exception as exc:  # 图谱是增强项：失败不影响这条记忆本身
+                logger.debug("[amo_data] 实体图谱写入失败: %r", exc)
         try:
             superseded = self._detect_supersede(bot_id, uid, scope, group_id, memory_id, text)
         except Exception:
@@ -467,37 +645,10 @@ class MemoryEngine:
             self.dao.set_platform(updates)
         return result
 
-def _norm_meta(engine, importance, created_at, last_hit_at, hit_count,
-               idem_key, subject, static, fact, text):
-    try:
-        importance = max(0.0, min(1.0, float(importance)))
-    except (TypeError, ValueError):
-        importance = 0.5
-    now = _now()
-    try:
-        created_at = int(created_at) if created_at else now
-    except (TypeError, ValueError):
-        created_at = now
-    try:
-        last_hit_at = int(last_hit_at) if last_hit_at else created_at
-    except (TypeError, ValueError):
-        last_hit_at = created_at
-    try:
-        hit_count = max(0, int(hit_count or 0))
-    except (TypeError, ValueError):
-        hit_count = 0
-    idem_key = _clean(idem_key, 120)
-    subject = "bot" if str(subject or "").strip().lower() == "bot" else "user"
-    if not idem_key and engine.setting("auto_dedupe", True) and static:
-        # 只有静态事实才自动生成去重键；消费/交易/流水账每次都是真实发生，必须逐条存
-        idem_key = ("fact:" + fact) if fact else _norm_key(text)
-    return {"importance": importance, "created_at": created_at,
-            "last_hit_at": last_hit_at, "hit_count": hit_count,
-            "idem_key": idem_key, "subject": subject}
-
 
 def _try_merge(engine, bot_id, uid, scope, group_id, text, importance, now,
-               subject, fact, static, keep_existing_content, idem_key=""):
+               subject, fact, static, keep_existing_content, idem_key: str = "",
+               tags: str = "") -> Optional[Dict[str, Any]]:
     """同一件事重复写入：抬重要度/合并/刷新，不新增行；返回结果或 None。"""
     if idem_key:
         row = engine.dao.find_active_by_idem(bot_id, uid, scope, group_id, idem_key)
@@ -510,12 +661,23 @@ def _try_merge(engine, bot_id, uid, scope, group_id, text, importance, now,
                 old_text = str(row["content"] or "")
                 merged_text = fact_dedupe.merge_fact(old_text, text)
                 if merged_text and merged_text != old_text:
-                    engine.dao.merge_content(int(row["id"]), merged_text, boost, now, subject, False)
+                    engine.dao.merge_content(int(row["id"]), merged_text, boost, now, subject,
+                                             False, tags)
                     engine._enqueue_embedding(int(row["id"]), merged_text)
                 else:
-                    engine.dao.touch(int(row["id"]), boost, now, subject)
+                    engine.dao.touch(int(row["id"]), boost, now, subject, tags)
+            elif keep_existing_content:
+                engine.dao.touch(int(row["id"]), boost, now, subject, tags)
             else:
-                engine.dao.touch(int(row["id"]), boost, now, subject)
+                # 同一个 idem 的非静态事实（事件/流水）：最新正文覆盖旧正文，
+                # 不再只 touch 一下把新内容静默丢掉（Phase 12 修）。
+                old_text = str(row["content"] or "")
+                if old_text != text:
+                    engine.dao.merge_content(int(row["id"]), text, boost, now, subject,
+                                             False, tags)
+                    engine._enqueue_embedding(int(row["id"]), text)
+                else:
+                    engine.dao.touch(int(row["id"]), boost, now, subject, tags)
             return {"ok": True, "memory_id": int(row["id"]), "duplicate": True}
         # 同一 idem_key 的旧行被归档/取代/合并后仍然占着唯一索引：再写同一件事必须
         # 复活/并回它，否则 INSERT 撞 UNIQUE 约束、整条记忆被静默丢掉。
@@ -524,15 +686,15 @@ def _try_merge(engine, bot_id, uid, scope, group_id, text, importance, now,
             base_id = int(stale["superseded_by"] or 0)
             status = str(stale["status"] or "active")
             if (status == "merged" and base_id > 0
-                    and engine.dao.touch(base_id, importance, now, subject)):
+                    and engine.dao.touch(base_id, importance, now, subject, tags)):
                 return {"ok": True, "memory_id": base_id, "duplicate": True}
-            engine.dao.revive(int(stale["id"]), importance, now, subject)
+            engine.dao.revive(int(stale["id"]), importance, now, subject, tags)
             return {"ok": True, "memory_id": int(stale["id"]), "duplicate": True}
     if engine.setting("auto_dedupe", True) and static:
         cand = engine._near_duplicate(bot_id, uid, scope, group_id, text)
         if cand is not None:
             engine.dao.merge_content(int(cand["id"]), text, importance, now, subject,
-                                     bool(keep_existing_content))
+                                     bool(keep_existing_content), tags)
             if not keep_existing_content:
                 engine._enqueue_embedding(int(cand["id"]), text)
             return {"ok": True, "memory_id": int(cand["id"]), "duplicate": True}

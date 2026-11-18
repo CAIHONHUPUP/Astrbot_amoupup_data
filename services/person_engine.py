@@ -1,17 +1,33 @@
 # -*- coding: utf-8 -*-
-"""services/person_engine.py —— 人物、跨平台身份、关系网。"""
+"""services/person_engine.py —— 人物、跨平台身份、关系网（只做 DB 编排）。
+
+身份模型是 persons（人）+ person_links（平台账号）+ identity_alias（旧身份别名）三层；
+「谁和谁是一个人 / 主 uid 选谁 / 合并搬哪些行」这类纯规则在 services/person_model.py，
+person_invariants() 是只读的不变式自检入口。
+"""
 
 from __future__ import annotations
 
 import sqlite3
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
+
+try:  # 身份归一的纯规则（同包）
+    from ..services import person_model
+except ImportError:  # 顶层导入（测试/脚本）
+    from services import person_model
+
+try:  # Phase 17：结构化事件日志（自动脱敏）
+    from ..core.errors import CODE_FAIL
+    from ..core.observability import log_event
+except ImportError:  # 顶层导入（测试/脚本）
+    from core.errors import CODE_FAIL
+    from core.observability import log_event
 
 try:  # AstrBot 包模式
     from ..utils.text_process import (
         _bot_filter,
         _clean,
-        _name_key,
         _now,
         _unique_labels,
         logger,
@@ -21,7 +37,6 @@ except ImportError:  # 顶层导入（测试/脚本）
     from utils.text_process import (
         _bot_filter,
         _clean,
-        _name_key,
         _now,
         _unique_labels,
         logger,
@@ -36,7 +51,7 @@ class PersonEngine:
         self.db = db
         self.settings = settings if settings is not None else {}
         self.persons = persons
-        self.plugin = None
+        self.plugin: Any = None
         self._canonical_cache = {}
 
     # ---- 迁移期适配：老 mixin 里直接用了 self.conn / self.lock / self.setting ----
@@ -103,18 +118,14 @@ class PersonEngine:
             ).fetchone()
             if same and int(same["pid"] or 0):
                 target = int(same["pid"])
-            key = _name_key(display)
-            if not target and auto_merge and len(key) >= 2:
+            if not target and auto_merge:
                 rows = self.conn.execute(
-                    "SELECT pid, name FROM person_links WHERE bot_id=? AND pid>0 AND platform!=?",
+                    "SELECT pid, name, platform FROM person_links "
+                    "WHERE bot_id=? AND pid>0 AND platform!=?",
                     (bot_id, platform),
                 ).fetchall()
-                pids = {
-                    int(item["pid"]) for item in rows
-                    if int(item["pid"] or 0) > 0 and _name_key(item["name"]) == key
-                }
-                if len(pids) == 1:
-                    target = pids.pop()
+                target = person_model.auto_merge_target(
+                    [dict(item) for item in rows], display, platform)
             if not target:
                 cur = self.conn.execute(
                     "INSERT INTO persons(bot_id, name, created_at, updated_at) VALUES(?,?,?,?)",
@@ -129,6 +140,7 @@ class PersonEngine:
             )
             self._backfill_messages(bot_id, platform, uid, target)
             self.conn.commit()
+            self.clear_canonical_cache()
             return target
 
 
@@ -150,7 +162,6 @@ class PersonEngine:
         bot_id, platform, uid = str(bot_id), str(platform or ""), str(uid)
         if not uid:
             return 0
-        self.clear_canonical_cache()
         with self.lock:
             pid = int(pid or 0)
             if pid <= 0:
@@ -164,12 +175,22 @@ class PersonEngine:
                 (bot_id, platform, uid),
             ).fetchone()
             if row and int(row["pid"] or 0) and int(row["pid"]) != pid:
+                old_pid = int(row["pid"])
                 left = self.conn.execute(
                     "SELECT COUNT(*) AS c FROM person_links WHERE bot_id=? AND pid=?",
-                    (bot_id, int(row["pid"])),
+                    (bot_id, old_pid),
                 ).fetchone()
-                old_pid = int(row["pid"])
-                if left is not None and int(left["c"] or 0) <= 1:
+                msgs = self.conn.execute(
+                    "SELECT COUNT(*) AS c FROM messages WHERE bot_id=? AND pid=?",
+                    (bot_id, old_pid),
+                ).fetchone()
+                mems = self.conn.execute(
+                    "SELECT COUNT(*) AS c FROM memories WHERE bot_id=? AND pid=?",
+                    (bot_id, old_pid),
+                ).fetchone()
+                if person_model.person_is_empty(
+                        max(0, int(left["c"] or 0) - 1),
+                        int(msgs["c"] or 0), int(mems["c"] or 0)):
                     self.conn.execute("DELETE FROM persons WHERE pid=?", (old_pid,))
             self.conn.execute(
                 "INSERT INTO person_links(bot_id, platform, uid, pid, name, created_at) "
@@ -179,47 +200,80 @@ class PersonEngine:
             )
             self._backfill_messages(bot_id, platform, uid, pid)
             self.conn.commit()
-            return pid
+        self.clear_canonical_cache()
+        return pid
 
 
     def unlink_identity(self, bot_id: str, platform: str, uid: str) -> bool:
-        """解绑：这个身份单独变成一个人物，不删聊天记录。"""
-        self.clear_canonical_cache()
+        """解绑：这个身份单独变成一个人物，不删聊天记录。
+
+        消息搬家用两条规则（person_model.unlink_message_scope）：
+        - 该平台只剩这一条 link：按平台搬（消息 uid 可能已归一成主 uid，按 uid 查会漏）；
+        - 同平台还有别的 link：只按 uid 搬，不能把别人的消息带走。
+        旧人物只有「没有 link、没有消息、没有记忆」时才删，否则会留下悬空 pid。
+        """
+        bot_id, platform, uid = str(bot_id), str(platform or ""), str(uid)
         with self.lock:
             row = self.conn.execute(
                 "SELECT pid FROM person_links WHERE bot_id=? AND platform=? AND uid=?",
-                (str(bot_id), str(platform or ""), str(uid)),
+                (bot_id, platform, uid),
             ).fetchone()
             if not row:
                 return False
             old_pid = int(row["pid"] or 0)
+            links = [dict(item) for item in self.conn.execute(
+                "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
+                (bot_id, old_pid),
+            ).fetchall()]
+            same_platform = [item for item in links
+                             if str(item.get("platform") or "") == platform]
             cur = self.conn.execute(
                 "INSERT INTO persons(bot_id, name, created_at, updated_at) VALUES(?,?,?,?)",
-                (str(bot_id), "", _now(), _now()),
+                (bot_id, "", _now(), _now()),
             )
             pid = int(cur.lastrowid or 0)
             self.conn.execute(
                 "UPDATE person_links SET pid=? WHERE bot_id=? AND platform=? AND uid=?",
-                (pid, str(bot_id), str(platform or ""), str(uid)),
+                (pid, bot_id, platform, uid),
             )
-            self.conn.execute(
-                "UPDATE messages SET pid=? WHERE bot_id=? AND pid=? AND platform=? AND uid=?",
-                (pid, str(bot_id), old_pid, str(platform or ""), str(uid)),
-            )
+            if person_model.unlink_message_scope(len(same_platform)) == "platform":
+                self.conn.execute(
+                    "UPDATE messages SET pid=? WHERE bot_id=? AND pid=? AND platform=?",
+                    (pid, bot_id, old_pid, platform),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE messages SET pid=? WHERE bot_id=? AND pid=? AND platform=? AND uid=?",
+                    (pid, bot_id, old_pid, platform, uid),
+                )
             if old_pid:
                 left = self.conn.execute(
                     "SELECT COUNT(*) AS c FROM person_links WHERE bot_id=? AND pid=?",
-                    (str(bot_id), old_pid),
+                    (bot_id, old_pid),
                 ).fetchone()
-                if left is not None and int(left["c"] or 0) == 0:
+                msgs = self.conn.execute(
+                    "SELECT COUNT(*) AS c FROM messages WHERE bot_id=? AND pid=?",
+                    (bot_id, old_pid),
+                ).fetchone()
+                mems = self.conn.execute(
+                    "SELECT COUNT(*) AS c FROM memories WHERE bot_id=? AND pid=?",
+                    (bot_id, old_pid),
+                ).fetchone()
+                if person_model.person_is_empty(int(left["c"] or 0), int(msgs["c"] or 0),
+                                                int(mems["c"] or 0)):
                     self.conn.execute("DELETE FROM persons WHERE pid=?", (old_pid,))
             self.conn.commit()
-            return True
+        self.clear_canonical_cache()
+        return True
 
 
     def merge_persons(self, bot_id: str, keep_pid: int, drop_pid: int) -> bool:
-        """把 drop 合并进 keep：身份、聊天记录、记忆都并过去，然后删掉 drop。"""
-        self.clear_canonical_cache()
+        """把 drop 合并进 keep：身份、聊天记录、记忆都并过去，然后删掉 drop。
+
+        顺序很重要：先把 drop 的 link 抄下来，再搬 person_links；否则搬完再查
+        drop_links 永远是空，记忆的 uid 永远归一不到主 uid（旧实现的静默 bug）。
+        记忆冲突（同 idem_key）标 merged 并挂到保留行，物理行一条不删。
+        """
         bot_id = str(bot_id)
         keep_pid, drop_pid = int(keep_pid or 0), int(drop_pid or 0)
         if not keep_pid or not drop_pid or keep_pid == drop_pid:
@@ -231,19 +285,9 @@ class PersonEngine:
             ).fetchone()
             if not exists or int(exists["c"] or 0) < 2:
                 return False
-            for table, column in (("person_links", "pid"), ("messages", "pid"),
-                                  ("memories", "pid")):
-                try:
-                    self.conn.execute(
-                        "UPDATE %s SET %s=? WHERE bot_id=? AND %s=?" % (table, column, column),
-                        (keep_pid, bot_id, drop_pid),
-                    )
-                except Exception:
-                    continue
-            # 记忆是按 uid 存的，合并时并到保留人物的第一个 uid 上
             keep_links = self.person_links(bot_id, keep_pid)
             drop_links = self.person_links(bot_id, drop_pid)
-            keep_uid = keep_links[0]["uid"] if keep_links else ""
+            keep_uid = person_model.canonical_link(keep_links, "")
             if keep_uid:
                 for item in drop_links:
                     rows = self.conn.execute(
@@ -265,14 +309,25 @@ class PersonEngine:
                             self.conn.execute(
                                 "UPDATE memories SET status='merged', superseded_by=? "
                                 "WHERE bot_id=? AND id=?",
-                                (int(conflict["id"]) if conflict else None, bot_id, int(mem["id"])),
+                                (int(conflict["id"]) if conflict else 0, bot_id, int(mem["id"])),
                             )
-            self.conn.execute("DELETE FROM persons WHERE bot_id=? AND pid=?", (bot_id, drop_pid))
+            for table, column in (("person_links", "pid"), ("messages", "pid"),
+                                  ("memories", "pid")):
+                self.conn.execute(
+                    "UPDATE %s SET %s=? WHERE bot_id=? AND %s=?" % (table, column, column),
+                    (keep_pid, bot_id, drop_pid),
+                )
+            # 保留人物没名字时用被合并人物的名字补上（面板不留空名）
             self.conn.execute(
-                "UPDATE persons SET updated_at=? WHERE pid=?", (_now(), keep_pid)
+                "UPDATE persons SET name=CASE WHEN name='' THEN "
+                "COALESCE((SELECT name FROM persons WHERE pid=?), '') ELSE name END, "
+                "updated_at=? WHERE pid=?",
+                (drop_pid, _now(), keep_pid),
             )
+            self.conn.execute("DELETE FROM persons WHERE bot_id=? AND pid=?", (bot_id, drop_pid))
             self.conn.commit()
-            return True
+        self.clear_canonical_cache()
+        return True
 
 
     def person_links(self, bot_id: str, pid: int) -> List[Dict[str, Any]]:
@@ -428,52 +483,56 @@ class PersonEngine:
     def merge_ghost_persons(self) -> int:
         """把「只有摘要、没有档案也没有记忆」的幽灵人物并进唯一有档案的那个人。
 
-        来历：历史迁移把摘要挂到了一个没有档案的 pid 上（换绑时人物被删、链接留下），
-        面板里就多出一个只有 10 条摘要的空人。
-        条件收得很窄：全库只有一个带 profile 的人；候选没有 profile、没有记忆、
-        也不含任何非摘要消息。并错了可以在面板对那条身份「解绑」还原。
+        条件收得很窄：同一个 bot 只能有一个人带 profile；候选没有 profile、没有记忆、
+        也不含任何非摘要消息，且至少有一条消息（纯空人物可能只是刚绑好的身份，不并）。
+        并错了可以在面板对那条身份「解绑」还原。
         """
         merged = 0
         with self.lock:
-            try:
-                profiled = set()
-                for row in self.conn.execute(
-                    "SELECT DISTINCT bot_id, uid FROM profiles"
-                ).fetchall():
-                    profiled.add((str(row["bot_id"]), str(row["uid"])))
-                if not profiled:
-                    return 0
-                links = self.conn.execute(
-                    "SELECT bot_id, platform, uid, pid FROM person_links WHERE pid>0"
-                ).fetchall()
-                keep_by_bot = {}
-                for row in links:
-                    if (str(row["bot_id"]), str(row["uid"])) in profiled:
-                        keep_by_bot[str(row["bot_id"])] = int(row["pid"])
-                if not keep_by_bot:
-                    return 0
-                persons = self.conn.execute(
-                    "SELECT pid, bot_id, name FROM persons ORDER BY pid"
-                ).fetchall()
-            except Exception:
+            profiled = set()
+            for row in self.conn.execute("SELECT DISTINCT bot_id, uid FROM profiles").fetchall():
+                profiled.add((str(row["bot_id"]), str(row["uid"])))
+            if not profiled:
                 return 0
-            for bot_id, keep_pid in keep_by_bot.items():
+            links = self.conn.execute(
+                "SELECT bot_id, platform, uid, pid FROM person_links WHERE pid>0"
+            ).fetchall()
+            keep_by_bot: Dict[str, Set[int]] = {}
+            for row in links:
+                if (str(row["bot_id"]), str(row["uid"])) in profiled:
+                    keep_by_bot.setdefault(str(row["bot_id"]), set()).add(int(row["pid"]))
+            targets = {bot: pids.pop() for bot, pids in keep_by_bot.items() if len(pids) == 1}
+            if not targets:
+                return 0
+            persons = self.conn.execute(
+                "SELECT pid, bot_id, name FROM persons ORDER BY pid"
+            ).fetchall()
+            for bot_id, keep_pid in targets.items():
                 for person in persons:
                     pid = int(person["pid"])
                     if str(person["bot_id"]) != bot_id or pid == keep_pid:
                         continue
+                    profile_hits = self.conn.execute(
+                        "SELECT COUNT(*) AS n FROM profiles WHERE bot_id=? AND uid IN "
+                        "(SELECT uid FROM person_links WHERE bot_id=? AND pid=?)",
+                        (bot_id, bot_id, pid),
+                    ).fetchone()
                     has_mem = self.conn.execute(
                         "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND pid=?",
                         (bot_id, pid),
                     ).fetchone()
-                    if has_mem and int(has_mem["n"] or 0) > 0:
-                        continue
                     other = self.conn.execute(
                         "SELECT COUNT(*) AS n FROM messages WHERE bot_id=? AND pid=? "
                         "AND COALESCE(role,'user') NOT IN ('summary', 'system')",
                         (bot_id, pid),
                     ).fetchone()
-                    if other and int(other["n"] or 0) > 0:
+                    total = self.conn.execute(
+                        "SELECT COUNT(*) AS n FROM messages WHERE bot_id=? AND pid=?",
+                        (bot_id, pid),
+                    ).fetchone()
+                    if not person_model.ghost_is_mergeable(
+                            int(profile_hits["n"] or 0), int(has_mem["n"] or 0),
+                            int(other["n"] or 0), int(total["n"] or 0)):
                         continue
                     if self.merge_persons(bot_id, keep_pid, pid):
                         merged += 1
@@ -518,87 +577,85 @@ class PersonEngine:
 
 
     def adopt_orphan_memories(self) -> int:
-        """没有身份记录的记忆（pid=0 且 uid 不在 person_links 里）。
+        """没有身份记录的记忆（COALESCE(pid,0)=0）归位。
 
-        库里只有一个人时不猜也错不了：整库归给他，uid 归一成主 uid。
-        多个人时不动（宁可不并，也不错并），只打一条日志等人来绑。
+        规则（宁可不并，也不错并）：
+        - uid 已经在 person_links 里：pid 就是那条 link 的 pid，uid 归一成主 uid
+          （老库 pid 回填失败时靠这条兜底）；
+        - uid 是机器人自己（identity_alias self）：归给消息最多的人；
+        - 该 bot 只有一个人物：整库归给他；
+        - 其余不动，只打日志等人来绑。
+        已经归位（pid>0）的行不会再被选中，所以重复调用是幂等的。
         """
         adopted = 0
         with self.lock:
-            try:
-                uids = [str(r["uid"]) for r in self.conn.execute(
-                    "SELECT DISTINCT uid FROM memories WHERE COALESCE(pid,0)=0 "
-                    "AND uid NOT IN ('', 'bot')"
-                ).fetchall()]
-            except Exception:
+            rows = self.conn.execute(
+                "SELECT id, bot_id, uid, scope, group_id, idem_key FROM memories "
+                "WHERE COALESCE(pid,0)=0 AND uid NOT IN ('', 'bot')"
+            ).fetchall()
+            if not rows:
                 return 0
-            if not uids:
-                return 0
-            linked = {(str(r["bot_id"]), str(r["uid"])) for r in self.conn.execute(
-                "SELECT bot_id, uid FROM person_links"
-            ).fetchall()}
-            # 机器人自己的 uid（identity_alias 里 self 指向的那个）
+            linked: Dict[Tuple[str, str], int] = {}
+            for row in self.conn.execute(
+                "SELECT bot_id, uid, pid FROM person_links WHERE pid>0 ORDER BY pid"
+            ).fetchall():
+                linked.setdefault((str(row["bot_id"]), str(row["uid"])), int(row["pid"]))
             self_uids = set()
-            try:
-                for row in self.conn.execute(
-                    "SELECT alias_uid FROM identity_alias WHERE uid='self' AND alias_uid!=''"
-                ).fetchall():
-                    self_uids.add(str(row["alias_uid"]))
-            except Exception:
-                self_uids = set()
-            persons = self.conn.execute("SELECT pid, bot_id FROM persons ORDER BY pid").fetchall()
-            for uid in uids:
-                if any(u == uid for (_b, u) in linked):
-                    continue
-                rows = self.conn.execute(
-                    "SELECT id, bot_id, scope, group_id, idem_key FROM memories "
-                    "WHERE COALESCE(pid,0)=0 AND uid=?", (uid,)
-                ).fetchall()
-                for mem in rows:
-                    bot_id = str(mem["bot_id"])
-                    same_bot = [p for p in persons if str(p["bot_id"]) == bot_id]
-                    pid = 0
-                    if uid in self_uids:
-                        # 这个 uid 是机器人自己：当年按 self 记账的记忆其实是「关于主人」的，
-                        # 归给消息最多的那个人（主人），不按"只有一个人物"去猜
-                        owner = self.conn.execute(
-                            "SELECT pid, COUNT(*) AS n FROM messages WHERE bot_id=? AND pid>0 "
-                            "GROUP BY pid ORDER BY n DESC LIMIT 1",
-                            (bot_id,),
-                        ).fetchone()
-                        pid = int(owner["pid"] or 0) if owner else 0
-                    elif len(same_bot) == 1:
-                        pid = int(same_bot[0]["pid"])
-                    if not pid:
+            for row in self.conn.execute(
+                "SELECT alias_uid FROM identity_alias WHERE uid='self' AND alias_uid!=''"
+            ).fetchall():
+                self_uids.add(str(row["alias_uid"]))
+            persons_by_bot: Dict[str, List[int]] = {}
+            for person in self.conn.execute(
+                    "SELECT pid, bot_id FROM persons ORDER BY pid").fetchall():
+                persons_by_bot.setdefault(str(person["bot_id"]), []).append(int(person["pid"]))
+            for mem in rows:
+                bot_id = str(mem["bot_id"])
+                uid = str(mem["uid"])
+                pid = linked.get((bot_id, uid), 0)
+                if not pid and uid in self_uids:
+                    owner = self.conn.execute(
+                        "SELECT pid, COUNT(*) AS n FROM messages WHERE bot_id=? AND pid>0 "
+                        "GROUP BY pid ORDER BY n DESC LIMIT 1",
+                        (bot_id,),
+                    ).fetchone()
+                    pid = int(owner["pid"] or 0) if owner else 0
+                if not pid:
+                    same_bot = persons_by_bot.get(bot_id, [])
+                    if len(same_bot) == 1:
+                        pid = same_bot[0]
+                    else:
                         logger.warning(
                             "[amo_data] 孤儿记忆未处理：uid=%s 有 %d 个人物，等手工绑定",
                             uid, len(same_bot),
                         )
                         continue
-                    links = [dict(i) for i in self.conn.execute(
-                        "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
-                        (bot_id, pid)).fetchall()]
-                    canonical = self._canonical_link(links, uid) or uid
-                    try:
-                        self.conn.execute(
-                            "UPDATE memories SET uid=?, pid=? WHERE id=?",
-                            (canonical, pid, int(mem["id"])),
-                        )
-                        adopted += 1
-                    except sqlite3.IntegrityError:
-                        old = self.conn.execute(
-                            "SELECT id FROM memories WHERE bot_id=? AND uid=? AND scope=? "
-                            "AND group_id=? AND idem_key=? LIMIT 1",
-                            (bot_id, canonical, str(mem["scope"]), str(mem["group_id"]),
-                             str(mem["idem_key"])),
-                        ).fetchone()
-                        self.conn.execute(
-                            "UPDATE memories SET status='merged', superseded_by=? WHERE id=?",
-                            (int(old["id"]) if old else 0, int(mem["id"])),
-                        )
+                links = [dict(i) for i in self.conn.execute(
+                    "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
+                    (bot_id, pid)).fetchall()]
+                canonical = self._canonical_link(links, uid) or uid
+                try:
+                    self.conn.execute(
+                        "UPDATE memories SET uid=?, pid=? WHERE id=?",
+                        (canonical, pid, int(mem["id"])),
+                    )
+                    adopted += 1
+                except sqlite3.IntegrityError:
+                    old = self.conn.execute(
+                        "SELECT id FROM memories WHERE bot_id=? AND uid=? AND scope=? "
+                        "AND group_id=? AND idem_key=? LIMIT 1",
+                        (bot_id, canonical, str(mem["scope"]), str(mem["group_id"]),
+                         str(mem["idem_key"])),
+                    ).fetchone()
+                    self.conn.execute(
+                        "UPDATE memories SET status='merged', superseded_by=? WHERE id=?",
+                        (int(old["id"]) if old else 0, int(mem["id"])),
+                    )
             if adopted:
                 self.conn.commit()
                 logger.info("[amo_data] 孤儿记忆归位 %d 条" % adopted)
+        if adopted:
+            self.clear_canonical_cache()
         return adopted
 
 
@@ -635,17 +692,8 @@ class PersonEngine:
 
 
     def _canonical_link(self, links, fallback: str = "") -> str:
-        """同一个人选一个主身份：优先飞书 open_id，其次第一条。"""
-        for item in links or []:
-            platform = str(item.get("platform") or "")
-            uid = str(item.get("uid") or "")
-            if platform == "lark" and uid:
-                return uid
-        for item in links or []:
-            uid = str(item.get("uid") or "")
-            if uid:
-                return uid
-        return str(fallback or "")
+        """兼容入口：主身份选择规则在 services/person_model.canonical_link。"""
+        return person_model.canonical_link(links, fallback)
 
 
     def _canonical_cache_get(self):
@@ -654,6 +702,21 @@ class PersonEngine:
             cache = {}
             self._canonical_cache = cache
         return cache
+
+
+    def person_invariants(self, bot_id: str = "") -> List[str]:
+        """只读检查三层身份不变式（I1~I4），返回问题列表；空列表表示一致。"""
+        where, params = _bot_filter(bot_id)
+        with self.lock:
+            persons = [dict(row) for row in self.conn.execute(
+                "SELECT pid, bot_id FROM persons WHERE 1=1" + where, params).fetchall()]
+            links = [dict(row) for row in self.conn.execute(
+                "SELECT bot_id, platform, uid, pid FROM person_links WHERE 1=1" + where,
+                params).fetchall()]
+            aliases = [dict(row) for row in self.conn.execute(
+                "SELECT bot_id, platform, uid, alias_platform, alias_uid "
+                "FROM identity_alias WHERE 1=1" + where, params).fetchall()]
+        return person_model.invariants(persons, links, aliases)
 
 
     def clear_canonical_cache(self) -> None:
@@ -765,7 +828,8 @@ class PersonEngine:
                     except sqlite3.IntegrityError as exc:
                         # 撞唯一索引（idx_mem_idem 含 uid）时只跳过这一条，
                         # 以前会让整个归一事务半途而废、后面的身份永远留在旧 uid
-                        logger.warning("[amo_data] 身份归一冲突 uid=%s pid=%s: %s", uid, pid, exc)
+                        log_event("warning", "person.identity.conflict", uid=uid, pid=pid,
+                                  detail=exc, error_code=CODE_FAIL)
                         continue
             self.conn.commit()
             self.clear_canonical_cache()

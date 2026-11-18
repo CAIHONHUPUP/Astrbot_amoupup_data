@@ -3,7 +3,7 @@
 
 守护插件、陪伴插件、脚本只认这一层；内部一律转发 services，不写 SQL、不做打分。
 
-41 个方法（名称 / 位置参数 / 默认值 / 返回形状都不能变）：
+44 个方法（名称 / 位置参数 / 默认值 / 返回形状都不能变）：
     画像  get_profile / save_profile / list_profiles / delete_profile
     记忆  remember / recall / list_memories / delete_memory
     夜间  nightly_memory_candidates / nightly_apply（守护插件 03:00 提炼用）
@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 
 try:  # 线上走 AstrBot 日志
     from astrbot.api import logger
@@ -36,7 +37,29 @@ except Exception:  # pragma: no cover - 离线单测
 
     logger = _NullLogger()
 
+try:  # 包模式
+    from ..services import recall_rerank, semantic_consolidation
+except ImportError:  # 顶层导入（测试/脚本）
+    try:
+        from services import recall_rerank, semantic_consolidation
+    except ImportError:  # 只装 api 的单测：重排/语义巩固关掉即可
+        recall_rerank = None  # type: ignore[assignment]
+        semantic_consolidation = None  # type: ignore[assignment]
+
 DEFAULT_BOT_ID = "default"
+
+#: 跨插件记忆 API 协议（Phase 19）：守护只读 protocol_info() 判断兼容性。
+PROTOCOL_NAME = "amo-memory"
+PROTOCOL_VERSION = "1.0"
+
+
+def memory_api_names():
+    """MemoryAPI 公开方法名（排序后作为 api_hash 的输入，只读）。
+
+    protocol_info 自身不计入：指纹描述的是「原有记忆 API 表面」。
+    """
+    return sorted(name for name in dir(MemoryAPI)
+                  if not name.startswith("_") and name != "protocol_info")
 
 
 class MemoryAPI:
@@ -101,8 +124,11 @@ class MemoryAPI:
     async def remember(self, bot_id: str, uid: str, content: str, kind: str = "fact",
                        importance: float = 0.5, scope: str = "private",
                        group_id: str = "", idem_key: str = "", subject: str = "user",
-                       platform: str = "") -> dict:
+                       platform: str = "", tags: str = "") -> dict:
         try:
+            refresh = getattr(self._p, "refresh_config", None)
+            if callable(refresh):
+                refresh()
             fn = None
             engine = getattr(self._p, "memory", None)
             if engine is not None:
@@ -116,27 +142,113 @@ class MemoryAPI:
                 self._bot(bot_id), uid, content,
                 kind=kind, importance=importance, scope=scope,
                 group_id=group_id, idem_key=idem_key, subject=subject,
-                platform=platform,
+                platform=platform, tags=tags,
             )
         except Exception as exc:
             logger.debug("[amo_data] 写入记忆失败: %s" % exc)
             return {"ok": False, "reason": str(exc)}
 
+    async def consolidate_semantic(self, bot_id: str) -> dict:
+        """跨天同主题语义巩固：聚类 → 一次小模型合成一句 → 覆盖 keep、其余 merged。"""
+        if semantic_consolidation is None:
+            return {"ok": False, "reason": "module_missing"}
+        if not self._p.settings.get("semantic_consolidation_enabled", True):
+            return {"ok": False, "reason": "disabled"}
+        provider = None
+        try:
+            provider = self._p.context.get_using_provider()
+        except Exception as exc:
+            logger.debug("[amo_data] 取语义巩固 provider 失败: %s" % exc)
+        if provider is None:
+            return {"ok": False, "reason": "no_provider"}
+        bot = self._bot(bot_id)
+        groups = await asyncio.to_thread(self._p.memory.semantic_clusters, bot)
+        if not groups:
+            return {"ok": True, "groups": 0, "merged": 0}
+        cap = max(1, int(self._p.settings.get("semantic_consolidation_max_groups", 3) or 3))
+        timeout = max(1.0, float(self._p.settings.get("semantic_consolidation_timeout", 20) or 20))
+        merged_total = 0
+        done = 0
+        for group in groups[:cap]:
+            prompt = semantic_consolidation.build_prompt(group["contents"])
+            try:
+                resp = await asyncio.wait_for(
+                    provider.text_chat(prompt=prompt, system_prompt="只输出合并后的那一句话。"),
+                    timeout=timeout,
+                )
+            except Exception as exc:
+                logger.debug("[amo_data] 语义巩固调用失败: %s" % exc)
+                continue
+            merged = str(getattr(resp, "completion_text", "") or "").strip()
+            if not semantic_consolidation.accept_merged(merged, group["contents"]):
+                continue
+            merged_total += await asyncio.to_thread(
+                self._p.memory.apply_semantic_merge,
+                int(group["keep_id"]), merged, list(group["ids"]),
+            )
+            done += 1
+        return {"ok": True, "groups": len(groups), "done": done, "merged": merged_total}
+
+    async def _maybe_rerank(self, items: list, query: str, limit: int) -> list:
+        """可选二阶段重排：只有开了配置、且能拿到当前 provider 才做；失败原样返回。"""
+        if not items or recall_rerank is None:
+            return items
+        if not self._p.settings.get("recall_rerank_enabled", False):
+            return items
+        provider = None
+        try:
+            provider = self._p.context.get_using_provider()
+        except Exception:
+            provider = None
+        if provider is None:
+            return items
+
+        async def _call(prompt: str) -> str:
+            resp = await provider.text_chat(
+                prompt=prompt, system_prompt="只输出 JSON，不要解释。"
+            )
+            return str(getattr(resp, "completion_text", "") or "")
+
+        picked = await recall_rerank.rerank(
+            items, query, limit, _call,
+            max_candidates=int(self._p.settings.get("recall_rerank_candidates", 20) or 20),
+            timeout=float(self._p.settings.get("recall_rerank_timeout", 8.0) or 8.0),
+        )
+        return picked[:max(1, int(limit))]
+
     async def recall(self, bot_id: str, uid: str, query: str = "", limit: int = 6,
                      scope: str = "", group_id: str = "", platform: str = "",
-                     pid: int = 0) -> list:
+                     pid: int = 0, tags: str = "") -> list:
         try:
+            refresh = getattr(self._p, "refresh_config", None)
+            if callable(refresh):
+                refresh()
             # recall 里有 BM25 打分（几千条记忆时几十毫秒）和可选的 embedding 网络请求，
             # 放线程里跑，别把 AstrBot 的事件循环卡住（卡住=所有聊天都排队）
-            return await asyncio.to_thread(
+            # tags 非空时只召回带这个标签的记忆（如「#活动 event:<id>」）。
+            items = await asyncio.to_thread(
                 self._p.retrieval.recall,
                 self._bot(bot_id), uid, query,
                 limit=limit, scope=scope, group_id=group_id,
-                platform=platform, pid=pid,
+                platform=platform, pid=pid, tags=tags,
             )
+            return await self._maybe_rerank(items, query, limit)
         except Exception as exc:
             logger.debug("[amo_data] 召回记忆失败: %s" % exc)
             return []
+
+    async def correct(self, bot_id: str, uid: str, hint: str, right_content: str,
+                      scope: str = "private", group_id: str = "",
+                      platform: str = "") -> dict:
+        """他说记错了：旧记忆标 superseded，再写正确版本（写失败则一条都不动）。"""
+        try:
+            return await asyncio.to_thread(
+                self._p.memory.correct, self._bot(bot_id), uid, hint, right_content,
+                scope=scope, group_id=group_id, platform=platform,
+            )
+        except Exception as exc:
+            logger.debug("[amo_data] 纠正记忆失败: %s" % exc)
+            return {"ok": False, "reason": str(exc)}
 
     async def list_memories(self, bot_id: str, uid: str = "", limit: int = 100) -> list:
         try:
@@ -166,7 +278,7 @@ class MemoryAPI:
     async def nightly_apply(self, meta: dict, facts: list, ids: list) -> dict:
         """提炼出的事实写回长期记忆，并归档对应原流水；一条都没写进去就不归档。"""
         info = meta or {}
-        bot_id = self._bot(info.get("bot_id"))
+        bot_id = self._bot(info.get("bot_id") or "")
         uid = str(info.get("uid") or "")
         scope = str(info.get("scope") or "private")
         group_id = str(info.get("group_id") or "")
@@ -471,3 +583,22 @@ class MemoryAPI:
         except Exception as exc:
             logger.debug("[amo_data] 合并人物失败: %s" % exc)
             return False
+
+    # ---------- 协议自述（Phase 19） ----------
+    def protocol_info(self):
+        """只读协议摘要：给守护 compat() 判断跨插件协议版本；不碰库、不联网。"""
+        try:  # 包模式优先
+            from ..models import db_schema
+            from ..utils.config import PLUGIN_VERSION as _version
+        except ImportError:  # 测试 / 顶层导入
+            from models import db_schema
+            from utils.config import PLUGIN_VERSION as _version
+        payload = "\n".join(memory_api_names()).encode("utf-8")
+        return {
+            "plugin": "Astrbot_amoupup_data",
+            "protocol": PROTOCOL_NAME,
+            "protocol_version": PROTOCOL_VERSION,
+            "api_hash": hashlib.sha256(payload).hexdigest()[:12],
+            "schema_version": int(getattr(db_schema, "LATEST_VERSION", 0) or 0),
+            "version": _version,
+        }

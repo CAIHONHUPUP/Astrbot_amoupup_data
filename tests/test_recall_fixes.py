@@ -200,11 +200,31 @@ class FakeVectorTests(unittest.TestCase):
         self.assertTrue(rows)
         self.assertIn("猫", rows[0]["content"])
 
-    def test_semantic_gate_rejects_flat_high_cos(self):
-        """余弦接近但拉不开差距时不能硬塞一条。"""
+    def test_semantic_gate_strict_rejects_flat_high_cos(self):
+        """strict 模式（旧行为）：余弦 0.71 但拉不开差距 → 不硬塞。
+
+        rank 模式（新默认）只按「和 top 差多少 + 绝对底线」放行，见下一条测试。
+        """
+        self.store.settings["recall_vec_gate"] = "strict"
         self.store._embed = lambda text: [1.0, 0.0, 0.0] if text == "毛孩子" else [0.7, 0.7, 0.0]
         mid = self.store.remember(BOT, UID, "主人养了一只橘色的猫。")["memory_id"]
         self.store._store_vec(mid, [0.7, 0.7, 0.0])
+        self.assertEqual(self.store.recall(BOT, UID, "毛孩子"), [])
+
+    def test_semantic_gate_rank_allows_top_within_floor(self):
+        """rank 模式：单条候选 0.707 ≥ 底线时算语义证据（底线这里显式设 0.60）。"""
+        self.store.settings["recall_vec_gate_floor"] = 0.60
+        self.store._embed = lambda text: [1.0, 0.0, 0.0] if text == "毛孩子" else [0.7, 0.7, 0.0]
+        mid = self.store.remember(BOT, UID, "主人养了一只橘色的猫。")["memory_id"]
+        self.store._store_vec(mid, [0.7, 0.7, 0.0])
+        rows = self.store.recall(BOT, UID, "毛孩子")
+        self.assertEqual([row["id"] for row in rows], [mid])
+
+    def test_semantic_gate_rank_floor_rejects_low_cos(self):
+        """rank 模式也有绝对底线：0.55 的余弦不该被当成「想起来了」。"""
+        self.store._embed = lambda text: [1.0, 0.0, 0.0] if text == "毛孩子" else [0.55, 0.835, 0.0]
+        mid = self.store.remember(BOT, UID, "主人养了一只橘色的猫。")["memory_id"]
+        self.store._store_vec(mid, [0.55, 0.835, 0.0])
         self.assertEqual(self.store.recall(BOT, UID, "毛孩子"), [])
 
 

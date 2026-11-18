@@ -64,6 +64,11 @@ def _clean(text: Any, limit: int = 2000) -> str:
     return value[:limit]
 
 
+def _norm_tags(tags: Any, limit: int = 200) -> str:
+    """标签归一化：折叠空白、去首尾、限长；None/空 -> ''（空值不覆盖旧标签）。"""
+    return _clean(tags, limit)
+
+
 def _bot_filter(bot_id: str, column: str = "bot_id"):
     """bot_id 为空表示不过滤（面板默认看全部 bot）。"""
     value = str(bot_id or "").strip()
@@ -188,15 +193,44 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "vec_weight": 0.45,                # 语义分在相关性里的占比
     "vec_min_cos": 0.82,               # 纯语义命中的最低余弦（bge-m3 中文普遍偏平）
     "vec_min_margin": 0.08,            # top 与第二名的余弦差；太小说明"谁都不像"
-    "diversify_ratio": 0.75,        # 注入时同一件事只留一条（0=关闭多样化）
+    "diversify_ratio": 0.60,        # 注入时同一件事只留一条（0=关闭多样化）；0.6 见 work/REPORT.md 实测
     "embedding_backfill": True,        # 启动时给旧记忆补向量
     "embedding_backfill_limit": 5000,  # 启动时最多排队补多少条（后台线程慢慢算）
     "recall_fts_enabled": False,       # 可选：FTS5 trigram 子串粗筛（默认关，见 CHANGELOG 实测）
     "recall_recent_pool": 600,         # 「最近活跃」这一层的上限，库大了不至于把几条热门记忆全捞进来
+    "recall_vector_candidates": 50,    # 全库向量 kNN 候选条数（0=关）；补「词面不重合」的记忆
+    "recall_token_or": True,           # 整句 LIKE 之外再拆词 OR 粗筛（跨词序也能进候选）
+    "recall_vec_gate": "rank",         # 纯语义命中闸：rank=只看和 top 差多少；strict=旧绝对门槛
+    "recall_vec_gate_topk": 2,         # rank 模式：最多放行 top 几名（A/B：2 比 3 少噪声）
+    "recall_vec_gate_floor": 0.80,     # rank 模式：余弦绝对底线（A/B：0.80 不牺牲弃答率）
+    "recall_vec_gate_window": 0.08,    # rank 模式：与 top 的最大差距
+    "recall_graph_route": True,        # 实体/关系路：名字、别名、关系词命中人物时按 pid 取记忆
+    "recall_graph_candidates": 10,     # 这一路最多带几条候选
+    "recall_multi_query": True,        # 剥壳/拆词变体各粗筛一次再合并（多查询）
+    "recall_multi_query_variants": 3,  # 最多几个变体（含原句）
+    "recall_entity_tags": True,        # 写入时给正文里出现的人物名字挂 entity:<名字> 标签
+    "recall_rerank_enabled": False,    # 二阶段 LLM 重排（默认关；开了多一次小模型调用）
+    "recall_rerank_candidates": 20,    # 重排最多看几条
+    "recall_rerank_timeout": 8.0,      # 重排超时（秒），超时/失败原样返回
+    "recall_entity_graph": True,       # 通用实体图谱：写时抽实体连边，查时按实体+一跳共现取记忆
+    "recall_entity_graph_memories": 10,  # 实体图谱最多带几条候选
+    "recall_revive_dormant": True,     # 强关键词命中休眠记忆时复活它
+    "lifecycle_enabled": True,         # 每天按 kind TTL 休眠/过期
+    "lifecycle_noise_days": 30,        # 流水账休眠天数（0=用内置表）
+    "lifecycle_summary_days": 180,     # 摘要休眠天数
+    "lifecycle_expire_days": 365,      # 流水账过期天数
+    "lifecycle_purge_expired_days": 0, # 过期后再过 N 天物理删除（0=只标记不删）
+    "lifecycle_consolidate_days": 7,   # 巩固：几天前的流水开始合并
+    "lifecycle_consolidate_min": 3,    # 巩固：同天同会话至少几条才合
+    "semantic_consolidation_enabled": True,   # 跨天同主题语义巩固（每天最多几组小模型调用）
+    "semantic_consolidation_max_groups": 3,
+    "semantic_consolidation_timeout": 20.0,
     "summary_merge_max_chars": 800,    # 同天摘要合并上限；超过就拆条，别造 4000 字怪物
     "meta_query_fallback": True,       # 「你还记得我吗」这类没有实词的查询按重要度兜底
     "meta_query_limit": 3,             # 兜底最多给几条
     "identity_debug": True,            # [IDENTITY_DEBUG]/[MEMORY_DEBUG] 日志开关
+    "chain_trace": True,               # 召回/写入每一步打 [chain] trace（排障用）
+    "config_watch": True,              # 面板保存配置后热更新，不用重启插件
 }
 
 
@@ -217,22 +251,39 @@ def _query_chars(text: Any) -> List[str]:
             if c not in STOP_CHARS]
 
 
+#: 纯连接词/代词：和它们拼成的二元组不是「词」（「我想」「的新」「听吗」「晚谁」），
+#: 不能当命中证据；而「迟到」「记住」「个月」里的虚词本来就是构词的一部分，必须保留。
+GLUE_CHARS = set("的了着过吗呢吧啊呀哦嗯嘛么什怎谁哪几我你他她它咱您")
+
+
 def _informative_terms(text: Any) -> List[str]:
-    """命中证据：去掉虚词后的二元组 / 英文词；太短的查询退回单字。
+    """命中证据：保邻接的二元组 / 英文词；太短的查询退回单字。
 
     这是为了修掉"什么都能推一条"：只靠 BM25 相对分排序时，
     库里哪怕没有相关内容，最像的那条也会被归一化成满分。
+
+    2026-11-17 真实回放评估修正：原实现先删虚词再配对，把「迟到」拆成
+    「迟|到」再配成「迟罚」，「记住」配成「住两」，精确命中被关键词闸整条挡掉
+    （66 条真实查询里 2 条空召回：迟到罚款 / 记住大米）。现在按原始字序列配对
+    （保邻接），只丢弃两种二元组：
+      * 两个字都是虚词的（了吗 / 多少 …，靠 STOP_CHARS）；
+      * 含纯连接词/代词的（我想 / 的新 / 听吗 …，靠 GLUE_CHARS）。
     """
     s = str(text or "").lower()
     words = [w for w in re.findall(r"[a-z0-9_]{2,}", s) if w not in STOP_CHARS]
-    chars = [c for c in re.findall(r"[\u4e00-\u9fff]", s) if c not in STOP_CHARS]
+    chars = re.findall(r"[\u4e00-\u9fff]", s)
     if not chars:
         return words
     if len(chars) == 1:
         return words + chars
-    return words + [
-        a + b for a, b in zip(chars, chars[1:]) if (a + b) not in STOP_BIGRAMS
-    ]
+    pairs: List[str] = []
+    for a, b in zip(chars, chars[1:]):
+        if a in STOP_CHARS and b in STOP_CHARS:
+            continue
+        if a in GLUE_CHARS or b in GLUE_CHARS:
+            continue
+        pairs.append(a + b)
+    return words + [pair for pair in pairs if pair not in STOP_BIGRAMS]
 
 
 def _jaccard(a: Iterable[str], b: Iterable[str]) -> float:
@@ -392,7 +443,7 @@ __all__ = [
     "_cosine",
     "_freshness",
     "_from_vec",
-    "_informative_terms",
+    "GLUE_CHARS", "_informative_terms",
     "_jaccard",
     "_name_key",
     "_norm_key",

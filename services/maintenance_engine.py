@@ -2,6 +2,9 @@
 """services/maintenance_engine.py —— 每小时的保留策略调度 + 面板统计。
 
 循环内容与 3.0 一致：压缩老聊天、清过期日志、每周记忆整理、每日备份、向量补全。
+调度改由 services/jobs.py 的 JobManager 托管（Phase 16，与陪伴/守护同一契约）：
+首跑 60 秒、之后 3600 秒；单飞、单次超时、失败退避、stop 统一取消；
+report() 可看到 last_run/fail_count/next_run 等快照。
 """
 
 from __future__ import annotations
@@ -14,6 +17,13 @@ try:
 except ImportError:  # 顶层导入（测试/脚本）
     from utils.text_process import _bot_filter, logger
 
+try:
+    from .jobs import JobManager
+    from ..services import entity_graph, lifecycle
+except ImportError:  # 顶层导入（测试/脚本）
+    from services.jobs import JobManager
+    from services import entity_graph, lifecycle
+
 
 class MaintenanceEngine:
     def __init__(self, plugin):
@@ -22,45 +32,47 @@ class MaintenanceEngine:
         self.settings = plugin.settings
         self._task = None
         self._running = False
+        # Phase 16：首跑 60s、之后 3600s；单飞/超时/退避/取消都交给 JobManager
+        self.jobs = JobManager(logger=logger, tag="amo_data", startup_delay=60.0)
 
     # ---------- 调度 ----------
     def start(self) -> None:
         if self._task is not None and not self._task.done():
             return
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             return  # 没有事件循环（脚本/单测）就不起后台任务
-        try:
-            self._task = loop.create_task(self._loop())
-            self._running = True
-        except Exception:
-            self._task = None
+        self.jobs.register("maintenance", self.run_once, 3600,
+                           immediate=True, timeout=1800)
+        self.jobs.start()
+        self._task = self.jobs.task("maintenance")
+        self._running = self._task is not None
 
     async def stop(self) -> None:
         self._running = False
-        if self._task is not None:
-            try:
-                self._task.cancel()
-            except Exception as exc:
-                logger.debug("[amo_data] optional step failed: %r", exc)
-            self._task = None
+        try:
+            await self.jobs.stop()
+        except Exception as exc:
+            logger.debug("[amo_data] 维护循环停止失败: %r", exc)
+        self._task = None
 
     async def _loop(self) -> None:
-        """启动 1 分钟后先跑一次，之后每小时一次。
+        """兼容入口：注册后等待停止；实际调度由 JobManager 负责。
 
-        以前是先 sleep 3600 再跑：只要热重载间隔小于 1 小时，日备份/周整理就永远不执行。
+        首跑仍是 60 秒、之后 3600 秒（以前是先 sleep 3600 再跑：只要热重载间隔
+        小于 1 小时，日备份/周整理就永远不执行）。
         """
-        first = True
-        while True:
-            try:
-                await asyncio.sleep(60 if first else 3600)
-                first = False
-                await self.run_once()
-            except asyncio.CancelledError:
-                return
-            except Exception as exc:
-                logger.debug("[amo_data] 维护循环异常: %s" % exc)
+        self.jobs.register("maintenance", self.run_once, 3600,
+                           immediate=True, timeout=1800)
+        self.jobs.start()
+        self._task = self.jobs.task("maintenance")
+        if self._task is None:
+            return
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            return
 
     async def run_once(self) -> Dict[str, Any]:
         bot_id = self.plugin._bot_id({}, write=True)  # 空 bot_id 会让清理/压缩变成空转
@@ -88,7 +100,65 @@ class MaintenanceEngine:
                 )
         except Exception as exc:
             logger.debug("[amo_data] 向量补全失败: %s" % exc)
+        try:
+            if self.settings.get("lifecycle_enabled", True):
+                result["lifecycle"] = await asyncio.to_thread(self._maybe_lifecycle, bot_id)
+        except Exception as exc:
+            result["lifecycle_error"] = str(exc)
+        try:
+            if self.settings.get("semantic_consolidation_enabled", True):
+                result["semantic"] = await self._maybe_semantic(bot_id)
+        except Exception as exc:
+            result["semantic_error"] = str(exc)
         return result
+
+    async def _maybe_semantic(self, bot_id: str) -> Dict[str, Any]:
+        """每天一次：跨天同主题语义巩固（最多 3 组；拿不到 provider 就跳过）。"""
+        import time
+        now = int(time.time())
+        key = "semantic_day_last"
+        last = 0  # 缓存读不到就按「从没跑过」处理，避免下面 last 未定义
+        try:
+            last = int(self.plugin.cache.cache_get(bot_id, key) or 0)
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
+        if not lifecycle.should_run(last, now):
+            return {"skipped": True, "last": last}
+        out = await self.plugin.mem.consolidate_semantic(bot_id)
+        try:
+            self.plugin.cache.cache_set(bot_id, key, str(now), ttl=40 * 86400)
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
+        logger.info("[amo_data] 语义巩固: %s" % out)
+        return out
+
+    def _maybe_lifecycle(self, bot_id: str) -> Dict[str, Any]:
+        """每天一次：按 kind 的 TTL 休眠/过期，顺手给老记忆补实体图谱。"""
+        import time
+        now = int(time.time())
+        key = "lifecycle_last"
+        last = 0
+        try:
+            last = int(self.plugin.cache.cache_get(bot_id, key) or 0)
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
+        # 错过补偿：不是「今天跑过就跳」，而是「距上次 ≥20 小时才跳」——
+        # 进程停两天，下次起来照常补跑一次（plan 按年龄算，天然幂等）
+        if not lifecycle.should_run(last, now):
+            return {"skipped": True, "last": last}
+        out = self.plugin.memory.run_lifecycle(bot_id, apply=True)
+        try:
+            if self.settings.get("recall_entity_graph", True):
+                out["graph_backfill"] = entity_graph.backfill(
+                    self.plugin.memory.dao, bot_id, 2000)
+        except Exception as exc:
+            out["graph_error"] = str(exc)
+        try:
+            self.plugin.cache.cache_set(bot_id, key, str(now), ttl=40 * 86400)
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
+        logger.info("[amo_data] 生命周期: %s" % out)
+        return out
 
     # ---------- 保留策略 ----------
     def retention(self, bot_id: str, chat_days: int = 14, compress_after: int = 3,
@@ -130,6 +200,10 @@ class MaintenanceEngine:
             result["archive"] = self.plugin.compression.archive_stale(bot_id, 90, 0.3, apply=True)
         except Exception as exc:
             result["archive"] = {"error": str(exc)}
+        try:
+            result["consolidate"] = self.plugin.compression.consolidate_noise(bot_id, apply=True)
+        except Exception as exc:
+            result["consolidate"] = {"error": str(exc)}
         try:
             self.plugin.cache.cache_set(bot_id, key, "1", ttl=8 * 86400)
         except Exception as exc:
@@ -176,7 +250,7 @@ class MaintenanceEngine:
                     row = self.db.conn.execute("SELECT COUNT(*) AS c FROM %s" % table).fetchone()
                 out[name] = int(row["c"] or 0) if row else 0
             try:
-                for status in ("active", "superseded", "archived", "merged"):
+                for status in ("active", "superseded", "archived", "merged", "dormant", "expired"):
                     row = self.db.conn.execute(
                         "SELECT COUNT(*) AS c FROM memories WHERE COALESCE(status,'active')=?"
                         + (" AND bot_id=?" if where else ""),

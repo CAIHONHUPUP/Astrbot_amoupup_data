@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from astrbot.api import logger
 
+from typing import Any
+
 try:  # 包模式
     from .web_request import web_request
 except ImportError:  # 顶层导入（测试）
@@ -21,13 +23,22 @@ try:
 except ImportError:
     from core.web_handlers import WebHandlersMixin
 
+try:  # 守卫自己的返回体也走统一封装
+    from .web_response import fail, forbidden, normalize
+except ImportError:
+    from core.web_response import fail, forbidden, normalize
+
 class WebAPIMixin(WebHandlersMixin):
     """面板路由注册；写接口只收 POST 并挡跨站请求。"""
+
+    #: 宿主插件实例由 Star 基类在运行时注入，mixin 这里只做类型声明。
+    context: Any
 
     WRITE_PATHS = frozenset({
         "/profile/save", "/profile/delete",
         "/person/link", "/person/unlink", "/person/merge",
         "/memory/save", "/memory/delete", "/memory/maintain", "/memory/backfill_platform",
+        "/lifecycle/run",
         "/relation/save", "/relation/delete",
         "/backup/now", "/backup/import", "/backup/restore",
         "/message/delete", "/message/clear", "/group/rename",
@@ -58,10 +69,10 @@ class WebAPIMixin(WebHandlersMixin):
                             site = str(headers.get("sec-fetch-site") or "").strip().lower()
                     if method and method != "POST":
                         logger.warning("[amo_data] 拒绝非 POST 的 Web 写操作（%s）" % method)
-                        return {"code": 403, "msg": "写操作只接受 POST（面板请刷新到最新版）"}
+                        return forbidden("写操作只接受 POST（面板请刷新到最新版）")
                     if site == "cross-site":
                         logger.warning("[amo_data] 拒绝跨站 Web 写操作（origin=%s）" % origin)
-                        return {"code": 403, "msg": "拒绝跨站请求"}
+                        return forbidden("拒绝跨站请求")
                     if origin and host:
                         from urllib.parse import urlparse
                         origin_host = (urlparse(origin).hostname or "").lower()
@@ -78,14 +89,16 @@ class WebAPIMixin(WebHandlersMixin):
                             else:
                                 logger.warning("[amo_data] 拒绝来源不一致的 Web 写操作: %s -> %s"
                                                % (origin, host))
-                                return {"code": 403, "msg": "拒绝来源不一致的请求"}
+                                return forbidden("拒绝来源不一致的请求")
             except Exception as exc:
                 logger.debug("[amo_data] Web 守卫检查失败（放行）: %s" % exc)
             try:
-                return await handler(*args, **kwargs)
+                out = await handler(*args, **kwargs)
             except Exception as exc:
                 logger.error("[amo_data] Web API 异常: %s" % exc)
-                return {"code": 1, "msg": str(exc)}
+                return fail(str(exc))
+            # 约定：handler 必须返回对象；不是对象时兜住，别把异常形状发给面板
+            return out if isinstance(out, dict) else normalize(out)
         return wrapper
 
 
@@ -134,6 +147,8 @@ class WebAPIMixin(WebHandlersMixin):
             ("/memory/delete", self.api_memory_delete),
             ("/memory/maintain", self.api_memory_maintain),
             ("/memory/backfill_platform", self.api_memory_backfill_platform),
+            ("/lifecycle", self.api_lifecycle),
+            ("/lifecycle/run", self.api_lifecycle_run),
             ("/relations", self.api_relations),
             ("/relation/save", self.api_relation_save),
             ("/relation/delete", self.api_relation_delete),

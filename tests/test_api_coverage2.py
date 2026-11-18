@@ -170,57 +170,9 @@ class MemoryApiExtraTests(unittest.TestCase):
         self.assertEqual(asyncio.run(self.api.restore_backup("nope.db")), {"error": 1})
 
 
-class FakeRequest:
-    """最小 quart/astrbot request 桩。"""
-
-    def __init__(self, payload=None, method="POST", headers=None,
-                 json_error=False, get_json_error=False):
-        self.payload = {} if payload is None else payload
-        self.method = method
-        self.headers = {} if headers is None else headers
-        self.json_error = json_error
-        self.get_json_error = get_json_error
-
-    async def json(self, default=None):
-        if self.json_error:
-            raise RuntimeError("没有 json")
-        return self.payload
-
-    async def get_json(self, silent=True):
-        if self.get_json_error:
-            raise RuntimeError("没有 get_json")
-        return self.payload
-
-
-class NoJsonRequest:
-    """只有 get_json、没有 json 的旧版请求对象。"""
-
-    def __init__(self, payload):
-        self.payload = payload
-
-    async def get_json(self, silent=True):
-        return self.payload
-
-
-class HeaderBoom:
-    def get(self, key):
-        raise RuntimeError("header 挂了")
-
-
-class FakeContext:
-    def __init__(self, registry=None, raise_on_register=False):
-        self.registered = []
-        self.registered_web_apis = list(registry or [])
-        self.raise_on_register = raise_on_register
-
-    def register_web_api(self, route, handler, methods, desc):
-        if self.raise_on_register:
-            raise RuntimeError("注册失败")
-        self.registered.append((route, methods, desc))
-        self.registered_web_apis.append((route, methods, handler))
-
-    def get_config(self, umo=None):
-        return {}
+# Phase 13 P2：请求/上下文桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import (BoomHeader as HeaderBoom, NoJsonRequest,  # noqa: E402
+                      StubRequest as FakeRequest, WebContext as FakeContext)
 
 
 class PluginApiCase(unittest.TestCase):
@@ -445,6 +397,22 @@ class PluginApiCase(unittest.TestCase):
         self.assertTrue(saved["data"]["ok"])
         self.assertEqual(saved["msg"], "已记住")
         self.assertEqual(len(self.plugin.store.list_memories(BOT, UID, 10)), 2)
+
+    def test_memories_endpoint_filters_by_event_tag(self) -> None:
+        """面板/HTTP 也能按 event:<id> 标签查回同一条活动记忆（M1 契约）。"""
+        self.plugin.store.remember(BOT, UID, "下午和柳如烟在商场逛街",
+                                   kind="activity", importance=0.25,
+                                   tags="#活动 event:ev_abc123")
+        self.plugin.store.remember(BOT, UID, "昨天和柳如烟逛街买了鞋")
+        hit = self.run_api(self.plugin.api_memories,
+                           {"tag": "event:ev_abc123", "uid": UID})
+        self.assertEqual(hit["code"], 0)
+        items = hit["data"]["items"]
+        self.assertEqual(len(items), 1, items)
+        self.assertIn("商场", items[0]["content"])
+        self.assertEqual(items[0]["tags"], "#活动 event:ev_abc123")
+        none = self.run_api(self.plugin.api_memories, {"tag": "event:nope", "uid": UID})
+        self.assertEqual(none["data"]["items"], [])
 
         bad_id = self.run_api(self.plugin.api_memory_delete, {"id": "不是数字"})
         self.assertEqual(bad_id["code"], 1)
@@ -719,7 +687,7 @@ class PluginApiCase(unittest.TestCase):
         self.plugin.config["backup_daily"] = True
 
         result = self.run_coro(self.plugin._maybe_weekly_cleanup(BOT))
-        self.assertEqual(set(result), {"compress", "archive"})
+        self.assertEqual(set(result), {"compress", "archive", "consolidate"})
         self.assertTrue(result["compress"]["applied"])
         self.assertEqual(result["archive"]["archived"], 0)
         self.assertEqual(self.run_coro(self.plugin._maybe_weekly_cleanup(BOT)),
@@ -956,7 +924,7 @@ class PluginApiCase(unittest.TestCase):
             self.assertNotIn("/Astrbot_amoupup_data/old-route", routes)
             self.assertIn("/other/keep", routes)
             own = [route for route in routes if route.startswith("/Astrbot_amoupup_data/")]
-            self.assertEqual(len(own), 34)
+            self.assertEqual(len(own), 36)
             self.assertIn("/Astrbot_amoupup_data/status", own)
             self.assertIn("/Astrbot_amoupup_data/backup/now", own)
         finally:
@@ -983,7 +951,7 @@ class PluginApiCase(unittest.TestCase):
         finally:
             self.context = old
         try:
-            self.assertEqual(len(weird.registered), 34)
+            self.assertEqual(len(weird.registered), 36)
         finally:
             plugin2.store.close()
 

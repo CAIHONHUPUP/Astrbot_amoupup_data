@@ -1,24 +1,26 @@
 # -*- coding: utf-8 -*-
-"""测试入口：先把临时目录指到工作区（本机沙箱不让写系统 temp），再发现全部用例。"""
+"""测试入口：临时目录用一次性 mkdtemp 根，跑完删掉，不在仓库留 _test_tmp。"""
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 import unittest
 import uuid
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-TMP = os.path.join(BASE, "_test_tmp")
-os.makedirs(TMP, exist_ok=True)
+TMP = tempfile.mkdtemp(prefix="amo-run-tests-")
 tempfile.tempdir = TMP
 os.environ["AMO_DATA_TEST_TMP"] = TMP
 sys.path.insert(0, BASE)
+atexit.register(lambda: shutil.rmtree(TMP, ignore_errors=True))
 
 
 def _mkdtemp(suffix="", prefix="tmp", dir=None):
     """mkdtemp 建出来的 0700 目录在本机沙箱里写不进去，换成普通 os.makedirs。"""
     base = dir or tempfile.gettempdir()
     path = os.path.join(base, str(prefix) + uuid.uuid4().hex[:10] + str(suffix))
-    os.makedirs(path, exist_ok=False)
+    os.makedirs(path, mode=0o777, exist_ok=False)
     return path
 
 

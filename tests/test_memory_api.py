@@ -223,16 +223,8 @@ class ErrorPathTests(ApiCase):
         self.assertEqual(self.run_api(api.stats("b")), {})
 
 
-class FakeContext:
-    def __init__(self):
-        self.registered = []
-        self.registered_web_apis = []
-
-    def register_web_api(self, route, handler, methods, desc):
-        self.registered.append((route, methods, desc))
-
-    def get_config(self, umo=None):
-        return {}
+# Phase 13 P2：面板上下文桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import WebContext as FakeContext  # noqa: E402
 
 
 class PluginTests(unittest.TestCase):

@@ -42,7 +42,7 @@ class MessageEngine:
         self.db = db
         self.settings = settings if settings is not None else {}
         self.persons = persons
-        self.plugin = None
+        self.plugin: Any = None
         self._canonical_cache = {}
 
     # ---- 迁移期适配：老 mixin 里直接用了 self.conn / self.lock / self.setting ----

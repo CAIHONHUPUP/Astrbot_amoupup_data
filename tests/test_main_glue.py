@@ -24,35 +24,9 @@ from main import AmoDataPlugin, _PluginStoreView  # noqa: E402
 from utils.config import PluginSettings  # noqa: E402
 
 
-class FakeDB:
-    def __init__(self):
-        self.conn = object()
-        self.lock = object()
-        self._conn = object()
-        self.closed = False
-        self.path = "x.db"
-
-    def close(self):
-        self.closed = True
-
-    def bot_ids(self):
-        return ["bot-a"]
-
-
-class FakeEngine:
-    def __init__(self):
-        self.flag = 0
-
-    def ping(self):
-        return "pong"
-
-
-class FakeEvent:
-    def __init__(self, text=""):
-        self.message_str = text
-
-    def plain_result(self, text):
-        return text
+# Phase 13 P2：三个桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import (StubEngine as FakeEngine, StubEvent as FakeEvent,  # noqa: E402
+                      StubPluginDB as FakeDB)
 
 
 def _plugin(**kwargs):

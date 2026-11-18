@@ -43,6 +43,18 @@
     "bot_id",
     "apply"
   ],
+  "consolidate_semantic": [
+    "bot_id"
+  ],
+  "correct": [
+    "bot_id",
+    "uid",
+    "hint",
+    "right_content",
+    "scope",
+    "group_id",
+    "platform"
+  ],
   "delete_memory": [
     "bot_id",
     "memory_id"
@@ -157,6 +169,7 @@
     "platform",
     "uid"
   ],
+  "protocol_info": [],
   "purge_logs": [
     "bot_id",
     "days"
@@ -169,7 +182,8 @@
     "scope",
     "group_id",
     "platform",
-    "pid"
+    "pid",
+    "tags"
   ],
   "recall_messages": [
     "bot_id",
@@ -188,7 +202,8 @@
     "group_id",
     "idem_key",
     "subject",
-    "platform"
+    "platform",
+    "tags"
   ],
   "resolve_person": [
     "bot_id",

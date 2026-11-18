@@ -1,0 +1,722 @@
+{
+  "meta": {
+    "source": "amo_data.db 真实只读快照（664 条记忆 / 480 条消息，2026-11-04~11-17）",
+    "person": "bot_id=大肥鱼, uid=ou_cec66ea605ad17f62632fb044bc5f6ac (pid 9)",
+    "k": 6,
+    "graders": {
+      "terms": "命中内容含任一 expect_terms 或 id 在 expect_ids，算相关",
+      "useful": "元问题：返回的是「能说的记忆」（非流水账/财务/社会见闻 JSON）算相关",
+      "abstain": "库里没有对应事实，返回任何一条都算噪声"
+    }
+  },
+  "queries": [
+    {
+      "id": "q01",
+      "cat": "人物",
+      "query": "我是怎么称呼你的",
+      "expect_ids": [
+        1047,
+        1080,
+        1114,
+        861,
+        909
+      ],
+      "expect_terms": [
+        "老婆"
+      ]
+    },
+    {
+      "id": "q02",
+      "cat": "人物",
+      "query": "我的昵称是什么",
+      "expect_ids": [
+        475,
+        474
+      ],
+      "expect_terms": [
+        "肥鱼",
+        "大肥鱼"
+      ]
+    },
+    {
+      "id": "q03",
+      "cat": "人物",
+      "query": "我的ID是多少",
+      "expect_ids": [
+        490,
+        491
+      ],
+      "expect_terms": [
+        "302578963"
+      ]
+    },
+    {
+      "id": "q04",
+      "cat": "人物",
+      "query": "我们主要用哪个平台聊天",
+      "expect_ids": [
+        750,
+        752,
+        940
+      ],
+      "expect_terms": [
+        "飞书"
+      ]
+    },
+    {
+      "id": "q05",
+      "cat": "人物",
+      "query": "QQ那边怎么办",
+      "expect_ids": [
+        752,
+        744,
+        940
+      ],
+      "expect_terms": [
+        "QQ"
+      ]
+    },
+    {
+      "id": "q06",
+      "cat": "人物",
+      "query": "我让你记住的那两个字是什么",
+      "expect_ids": [
+        751,
+        790
+      ],
+      "expect_terms": [
+        "大米"
+      ]
+    },
+    {
+      "id": "q07",
+      "cat": "人物",
+      "query": "你被叫傻妞那次",
+      "expect_ids": [
+        892
+      ],
+      "expect_terms": [
+        "傻妞"
+      ]
+    },
+    {
+      "id": "q08",
+      "cat": "人物",
+      "query": "我给你设的头像是什么样",
+      "expect_ids": [
+        482
+      ],
+      "expect_terms": [
+        "女仆装"
+      ]
+    },
+    {
+      "id": "q09",
+      "cat": "人物",
+      "query": "我是不是说过会永远陪着你",
+      "expect_ids": [
+        746,
+        906,
+        905
+      ],
+      "expect_terms": [
+        "永远陪"
+      ]
+    },
+    {
+      "id": "q10",
+      "cat": "事件",
+      "query": "11月6号晚上我吃了什么",
+      "expect_ids": [
+        900,
+        894,
+        891
+      ],
+      "expect_terms": [
+        "牛杂"
+      ]
+    },
+    {
+      "id": "q11",
+      "cat": "事件",
+      "query": "我发烧去医院是哪天",
+      "expect_ids": [
+        1147,
+        1135,
+        1134,
+        1130
+      ],
+      "expect_terms": [
+        "发烧"
+      ]
+    },
+    {
+      "id": "q12",
+      "cat": "事件",
+      "query": "我在医院排队排得腿都麻了",
+      "expect_ids": [
+        1131,
+        1130
+      ],
+      "expect_terms": [
+        "排队"
+      ]
+    },
+    {
+      "id": "q13",
+      "cat": "事件",
+      "query": "我们去吃小龙坎火锅",
+      "expect_ids": [
+        1092,
+        1111,
+        1043
+      ],
+      "expect_terms": [
+        "小龙坎"
+      ]
+    },
+    {
+      "id": "q14",
+      "cat": "事件",
+      "query": "江边散步看到有人放风筝",
+      "expect_ids": [
+        1106,
+        1111
+      ],
+      "expect_terms": [
+        "风筝"
+      ]
+    },
+    {
+      "id": "q15",
+      "cat": "事件",
+      "query": "我把菜炒糊了怎么办",
+      "expect_ids": [
+        1086,
+        1083,
+        1111
+      ],
+      "expect_terms": [
+        "炒糊",
+        "糊了"
+      ]
+    },
+    {
+      "id": "q16",
+      "cat": "事件",
+      "query": "闺蜜的男朋友每次都说会改",
+      "expect_ids": [
+        1079,
+        1077,
+        1076
+      ],
+      "expect_terms": [
+        "闺蜜"
+      ]
+    },
+    {
+      "id": "q17",
+      "cat": "事件",
+      "query": "我上班摸鱼被领导说了",
+      "expect_ids": [
+        952
+      ],
+      "expect_terms": [
+        "摸鱼"
+      ]
+    },
+    {
+      "id": "q18",
+      "cat": "事件",
+      "query": "迟到罚了多少钱",
+      "expect_ids": [
+        1138,
+        1110
+      ],
+      "expect_terms": [
+        "迟到"
+      ]
+    },
+    {
+      "id": "q19",
+      "cat": "事件",
+      "query": "我存定期了吗",
+      "expect_ids": [
+        1118,
+        1119,
+        1117
+      ],
+      "expect_terms": [
+        "定期"
+      ]
+    },
+    {
+      "id": "q20",
+      "cat": "事件",
+      "query": "图片一直传不过去是什么问题",
+      "expect_ids": [
+        972,
+        901
+      ],
+      "expect_terms": [
+        "图片"
+      ]
+    },
+    {
+      "id": "q21",
+      "cat": "事件",
+      "query": "医生说我是普通感冒",
+      "expect_ids": [
+        1144,
+        1135,
+        1134
+      ],
+      "expect_terms": [
+        "感冒"
+      ]
+    },
+    {
+      "id": "q22",
+      "cat": "事件",
+      "query": "我带了蛋挞回来",
+      "expect_ids": [
+        1122
+      ],
+      "expect_terms": [
+        "蛋挞"
+      ]
+    },
+    {
+      "id": "q23",
+      "cat": "事件",
+      "query": "周五晚上去吃牛杂和小烧烤",
+      "expect_ids": [
+        893,
+        900,
+        894
+      ],
+      "expect_terms": [
+        "牛杂"
+      ]
+    },
+    {
+      "id": "q24",
+      "cat": "事件",
+      "query": "杀毒软件把我的声音当成病毒",
+      "expect_ids": [
+        970,
+        488,
+        487
+      ],
+      "expect_terms": [
+        "杀毒软件"
+      ]
+    },
+    {
+      "id": "q25",
+      "cat": "偏好",
+      "query": "我喜欢看什么动画片",
+      "expect_ids": [
+        1084,
+        1081
+      ],
+      "expect_terms": [
+        "喜羊羊"
+      ]
+    },
+    {
+      "id": "q26",
+      "cat": "偏好",
+      "query": "下雨天我想吃什么",
+      "expect_ids": [
+        1033,
+        1014,
+        1020
+      ],
+      "expect_terms": [
+        "火锅"
+      ]
+    },
+    {
+      "id": "q27",
+      "cat": "偏好",
+      "query": "我喜欢吃牛杂吗",
+      "expect_ids": [
+        988,
+        900
+      ],
+      "expect_terms": [
+        "牛杂"
+      ]
+    },
+    {
+      "id": "q28",
+      "cat": "偏好",
+      "query": "我是不是只吃泡面也行",
+      "expect_ids": [
+        1002
+      ],
+      "expect_terms": [
+        "泡面"
+      ]
+    },
+    {
+      "id": "q29",
+      "cat": "偏好",
+      "query": "我最爱吃什么锅",
+      "expect_ids": [
+        983
+      ],
+      "expect_terms": [
+        "麻辣火锅",
+        "火锅"
+      ]
+    },
+    {
+      "id": "q30",
+      "cat": "偏好",
+      "query": "我喜欢和谁一起看电视",
+      "expect_ids": [
+        1084
+      ],
+      "expect_terms": [
+        "看电视"
+      ]
+    },
+    {
+      "id": "q31",
+      "cat": "偏好",
+      "query": "夜里饿了会点什么",
+      "expect_ids": [
+        1059,
+        892
+      ],
+      "expect_terms": [
+        "夜宵"
+      ]
+    },
+    {
+      "id": "q32",
+      "cat": "偏好",
+      "query": "我喜欢吃哪种面",
+      "expect_ids": [
+        973,
+        976,
+        978,
+        981
+      ],
+      "expect_terms": [
+        "番茄牛腩"
+      ]
+    },
+    {
+      "id": "q33",
+      "cat": "偏好",
+      "query": "我晚饭常吃什么",
+      "expect_ids": [
+        983,
+        973
+      ],
+      "expect_terms": [
+        "牛腩",
+        "番茄"
+      ]
+    },
+    {
+      "id": "q34",
+      "cat": "时间",
+      "query": "昨天我们干了什么",
+      "expect_ids": [
+        1144
+      ],
+      "expect_terms": [
+        "2026-11-16"
+      ]
+    },
+    {
+      "id": "q35",
+      "cat": "时间",
+      "query": "昨天下午我干嘛了",
+      "expect_ids": [
+        1144,
+        1135
+      ],
+      "expect_terms": [
+        "2026-11-16"
+      ]
+    },
+    {
+      "id": "q36",
+      "cat": "时间",
+      "query": "前天晚上我们吃了什么",
+      "expect_ids": [
+        1111
+      ],
+      "expect_terms": [
+        "2026-11-15",
+        "火锅"
+      ]
+    },
+    {
+      "id": "q37",
+      "cat": "时间",
+      "query": "11月15号那天怎么样",
+      "expect_ids": [
+        1111,
+        1106,
+        1109
+      ],
+      "expect_terms": [
+        "2026-11-15"
+      ]
+    },
+    {
+      "id": "q38",
+      "cat": "时间",
+      "query": "11月14号发生了什么",
+      "expect_ids": [
+        1061,
+        1043
+      ],
+      "expect_terms": [
+        "2026-11-14"
+      ]
+    },
+    {
+      "id": "q39",
+      "cat": "时间",
+      "query": "11月12号我在忙什么",
+      "expect_ids": [
+        975,
+        972,
+        990
+      ],
+      "expect_terms": [
+        "bug"
+      ]
+    },
+    {
+      "id": "q40",
+      "cat": "时间",
+      "query": "最近三天我都干嘛了",
+      "expect_ids": [
+        1144,
+        1147,
+        1135
+      ],
+      "expect_terms": [
+        "11-16",
+        "11-17",
+        "发烧"
+      ]
+    },
+    {
+      "id": "q41",
+      "cat": "时间",
+      "query": "上周日我们去吃火锅了吗",
+      "expect_ids": [
+        1092,
+        1111
+      ],
+      "expect_terms": [
+        "火锅"
+      ]
+    },
+    {
+      "id": "q42",
+      "cat": "时间",
+      "query": "早上我吃了什么",
+      "expect_ids": [
+        996,
+        1064
+      ],
+      "expect_terms": [
+        "肠粉",
+        "包子"
+      ]
+    },
+    {
+      "id": "q43",
+      "cat": "时间",
+      "query": "昨晚谁先睡的",
+      "expect_ids": [
+        1108,
+        1109
+      ],
+      "expect_terms": [
+        "睡"
+      ]
+    },
+    {
+      "id": "q44",
+      "cat": "时间",
+      "query": "我这个月花了多少钱",
+      "expect_ids": [
+        1118,
+        1136,
+        1110
+      ],
+      "expect_terms": [
+        "支出"
+      ]
+    },
+    {
+      "id": "q45",
+      "cat": "元问题",
+      "query": "你还记得我吗",
+      "grader": "useful"
+    },
+    {
+      "id": "q46",
+      "cat": "元问题",
+      "query": "你记得我是谁吗",
+      "grader": "useful"
+    },
+    {
+      "id": "q47",
+      "cat": "元问题",
+      "query": "还记得我说过什么吗",
+      "grader": "useful"
+    },
+    {
+      "id": "q48",
+      "cat": "元问题",
+      "query": "你都记得我哪些事",
+      "grader": "useful"
+    },
+    {
+      "id": "q49",
+      "cat": "元问题",
+      "query": "你还记得我们第一次说话吗",
+      "grader": "useful"
+    },
+    {
+      "id": "q50",
+      "cat": "元问题",
+      "query": "还记得大米的事吗",
+      "expect_ids": [
+        751,
+        790
+      ],
+      "expect_terms": [
+        "大米"
+      ]
+    },
+    {
+      "id": "q51",
+      "cat": "元问题",
+      "query": "记得我的生日吗",
+      "grader": "abstain"
+    },
+    {
+      "id": "q52",
+      "cat": "元问题",
+      "query": "你了解我吗",
+      "grader": "useful"
+    },
+    {
+      "id": "q53",
+      "cat": "无答案",
+      "query": "量子力学作业没写完",
+      "grader": "abstain"
+    },
+    {
+      "id": "q54",
+      "cat": "无答案",
+      "query": "外面下雪了吗",
+      "grader": "abstain"
+    },
+    {
+      "id": "q55",
+      "cat": "无答案",
+      "query": "我养的那只狗呢",
+      "grader": "abstain"
+    },
+    {
+      "id": "q56",
+      "cat": "无答案",
+      "query": "我想学钢琴",
+      "grader": "abstain"
+    },
+    {
+      "id": "q57",
+      "cat": "无答案",
+      "query": "周杰伦的新歌好听吗",
+      "grader": "abstain"
+    },
+    {
+      "id": "q58",
+      "cat": "无答案",
+      "query": "帮我订一张机票",
+      "grader": "abstain"
+    },
+    {
+      "id": "q59",
+      "cat": "无答案",
+      "query": "今天几号",
+      "grader": "abstain"
+    },
+    {
+      "id": "q60",
+      "cat": "无答案",
+      "query": "哈哈哈",
+      "grader": "abstain"
+    },
+    {
+      "id": "q61",
+      "cat": "无答案",
+      "query": "好",
+      "grader": "abstain"
+    },
+    {
+      "id": "q62",
+      "cat": "无答案",
+      "query": "老婆，我好心疼",
+      "expect_ids": [
+        1135,
+        1134,
+        1130
+      ],
+      "expect_terms": [
+        "心疼"
+      ]
+    },
+    {
+      "id": "q63",
+      "cat": "无答案",
+      "query": "等你退烧我再来宠幸你",
+      "expect_ids": [
+        1147,
+        1135,
+        1126
+      ],
+      "expect_terms": [
+        "退烧",
+        "发烧"
+      ]
+    },
+    {
+      "id": "q64",
+      "cat": "无答案",
+      "query": "我到家了，你在干嘛",
+      "grader": "abstain"
+    },
+    {
+      "id": "q65",
+      "cat": "无答案",
+      "query": "给我转500块",
+      "expect_ids": [
+        1061
+      ],
+      "expect_terms": [
+        "500"
+      ]
+    },
+    {
+      "id": "q66",
+      "cat": "无答案",
+      "query": "睡了吗",
+      "grader": "abstain"
+    }
+  ]
+}

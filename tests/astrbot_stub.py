@@ -9,6 +9,18 @@
 import sys
 import types
 
+#: 三插件共用的 canonical stub 版本（test_test_infra 会断言三份 sha256/版本一致）。
+STUB_VERSION = "1.0"
+
+#: install() 之后必须出现在 sys.modules / 模块属性里的名字（防回退）。
+REQUIRED_MODULES = (
+    "astrbot", "astrbot.api", "astrbot.api.star", "astrbot.api.event",
+    "astrbot.api.message_components", "astrbot.api.provider",
+    "astrbot.core", "astrbot.core.message", "astrbot.core.message.message_event_result",
+    "astrbot.core.platform", "astrbot.core.platform.astr_message_event",
+    "astrbot.core.platform.message_session",
+)
+
 _INSTALLED = False
 
 
@@ -17,16 +29,8 @@ class _Logger:
         return lambda *args, **kwargs: None
 
 
-def install():
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    _INSTALLED = True
-
-    astrbot = types.ModuleType("astrbot")
-    astrbot.__path__ = []
-    astrbot.__dsh_stub__ = True
-
+def _build_api_module():
+    """astrbot.api：logger + AstrBotConfig。"""
     api = types.ModuleType("astrbot.api")
     api.logger = _Logger()
 
@@ -35,7 +39,11 @@ def install():
             return True
 
     api.AstrBotConfig = AstrBotConfig
+    return api
 
+
+def _build_star_module():
+    """astrbot.api.star：Star / Context。"""
     star = types.ModuleType("astrbot.api.star")
 
     class Star:
@@ -48,7 +56,11 @@ def install():
 
     star.Star = Star
     star.Context = Context
+    return star
 
+
+def _build_event_module():
+    """astrbot.api.event：AstrMessageEvent + filter 装饰器桩。"""
     event = types.ModuleType("astrbot.api.event")
 
     class AstrMessageEvent:
@@ -78,7 +90,11 @@ def install():
 
     event.filter = _Filter()
     event.AstrBotEvent = AstrMessageEvent
+    return event
 
+
+def _build_components_module():
+    """astrbot.api.message_components；返回 (模块, Plain 类)。"""
     components = types.ModuleType("astrbot.api.message_components")
 
     class Plain:
@@ -93,28 +109,55 @@ def install():
         def __init__(self, qq=""):
             self.qq = qq
 
+    class Record:
+        def __init__(self, file=None, url=None, text=""):
+            self.file = file
+            self.url = url or file
+            self.text = text
+
+    class Image:
+        def __init__(self, file=None, **kwargs):
+            self.file = file
+            self.path = kwargs.get("path")
+
+        @classmethod
+        def fromFileSystem(cls, path, **kwargs):
+            return cls(file=str(path), path=str(path))
+
+        @classmethod
+        def fromBase64(cls, payload, **kwargs):
+            return cls(file="base64://" + str(payload))
+
+        @classmethod
+        def fromURL(cls, url, **kwargs):
+            return cls(file=str(url))
+
     components.Plain = Plain
     components.Reply = Reply
     components.At = At
+    components.Record = Record
+    components.Image = Image
+    return components, Plain
 
+
+def _build_provider_module():
+    """astrbot.api.provider：LLMResponse。"""
     provider = types.ModuleType("astrbot.api.provider")
 
     class LLMResponse:
         pass
 
     provider.LLMResponse = LLMResponse
+    return provider
 
-    core = types.ModuleType("astrbot.core")
-    core.__path__ = []
 
-    message_pkg = types.ModuleType("astrbot.core.message")
-    message_pkg.__path__ = []
-
+def _build_result_module(plain_cls):
+    """astrbot.core.message.message_event_result：MessageChain。"""
     result_mod = types.ModuleType("astrbot.core.message.message_event_result")
 
     class MessageChain:
-        def __init__(self):
-            self.chain = []
+        def __init__(self, chain=None):
+            self.chain = list(chain or [])
 
         def clear(self):
             self.chain.clear()
@@ -123,13 +166,14 @@ def install():
             self.chain.append(item)
 
         def message(self, text):
-            self.chain.append(Plain(text))
+            self.chain.append(plain_cls(text))
 
     result_mod.MessageChain = MessageChain
+    return result_mod
 
-    platform_pkg = types.ModuleType("astrbot.core.platform")
-    platform_pkg.__path__ = []
 
+def _build_platform_modules():
+    """(astr_message_event, message_session)：两个模块共用同一个 MessageSession。"""
     ame = types.ModuleType("astrbot.core.platform.astr_message_event")
 
     class MessageSession:
@@ -139,6 +183,32 @@ def install():
 
     session_mod = types.ModuleType("astrbot.core.platform.message_session")
     session_mod.MessageSession = MessageSession
+    return ame, session_mod
+
+
+def install():
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+
+    astrbot = types.ModuleType("astrbot")
+    astrbot.__path__ = []
+    astrbot.__dsh_stub__ = True
+    api = _build_api_module()
+    star = _build_star_module()
+    event = _build_event_module()
+    components, plain_cls = _build_components_module()
+    provider = _build_provider_module()
+
+    core = types.ModuleType("astrbot.core")
+    core.__path__ = []
+    message_pkg = types.ModuleType("astrbot.core.message")
+    message_pkg.__path__ = []
+    result_mod = _build_result_module(plain_cls)
+    platform_pkg = types.ModuleType("astrbot.core.platform")
+    platform_pkg.__path__ = []
+    ame, session_mod = _build_platform_modules()
 
     sys.modules.update({
         "astrbot": astrbot,
@@ -154,3 +224,7 @@ def install():
         "astrbot.core.platform.astr_message_event": ame,
         "astrbot.core.platform.message_session": session_mod,
     })
+
+
+def is_installed():
+    return bool(_INSTALLED)

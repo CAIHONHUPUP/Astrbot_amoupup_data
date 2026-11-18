@@ -3,7 +3,9 @@
 
 import io
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from datetime import datetime
 from unittest import mock
@@ -143,11 +145,12 @@ class ClockExtraTests(unittest.TestCase):
 
 class ImportFailureTests(unittest.TestCase):
     def setUp(self):
-        self.store = DataStore(os.path.join(os.path.dirname(__file__), "..",
-                                            ".test-tmp", "import-edge.db"))
+        self._tmp_root = tempfile.mkdtemp(prefix="amo-import-edge-")
+        self.store = DataStore(os.path.join(self._tmp_root, "import-edge.db"))
 
     def tearDown(self):
         self.store.close()
+        shutil.rmtree(self._tmp_root, ignore_errors=True)
 
     def test_import_failures_are_counted(self):
         def boom(*args, **kwargs):

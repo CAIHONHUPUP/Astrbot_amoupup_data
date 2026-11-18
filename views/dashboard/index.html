@@ -185,6 +185,11 @@
         <button class="ghost" id="btnRefreshMem">刷新</button>
       </div>
       <div id="memList"></div>
+      <div class="hint" id="lifecycleStat">生命周期：读取中…</div>
+      <div class="row">
+        <button class="ghost" id="btnLifecyclePreview">预览影响</button>
+        <button class="ghost danger" id="btnLifecycleRun">立即整理</button>
+      </div>
       <label>新增一条记忆</label>
       <div class="row">
         <input class="grow" id="newMem" placeholder="例如：他养了一只叫团子的猫">
@@ -356,7 +361,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PLUGIN = "Astr_Amo_data";
+const PLUGIN = "Astrbot_amoupup_data";
 const bases = [
   "/api/v1/plugins/extensions/" + PLUGIN,
   "/api/plug/" + PLUGIN,
@@ -447,7 +452,7 @@ function bridge() {
 }
 
 const WRITE_ACTIONS = new Set([
-  "profile/save", "profile/delete", "memory/save", "memory/delete",
+  "profile/save", "profile/delete", "memory/save", "memory/delete", "lifecycle/run",
   "person/link", "person/unlink", "person/merge",
   "relation/save", "relation/delete", "message/delete", "message/clear",
   "log/delete", "log/clear", "schedule/delete", "maintenance",
@@ -1026,6 +1031,37 @@ document.getElementById("btnBackfillPlat").addEventListener("click", async () =>
     if (currentUid) openProfile(currentUid);
   } catch (error) { toast("回填失败：" + error.message, true); }
 });
+async function loadLifecycleStat() {
+  try {
+    const data = objectFrom(await call("lifecycle")) || {};
+    const counts = data.counts || {};
+    document.getElementById("lifecycleStat").textContent =
+      "生命周期：活跃 " + (counts.active || 0) + " · 休眠 " + (counts.dormant || 0) +
+      " · 过期 " + (counts.expired || 0) + " · 当前会休眠 " + (data.dormant || 0) +
+      " · 会过期 " + (data.expired || 0);
+  } catch (error) {
+    document.getElementById("lifecycleStat").textContent = "生命周期：读取失败";
+  }
+}
+document.getElementById("btnLifecyclePreview").addEventListener("click", async () => {
+  try {
+    const data = objectFrom(await call("lifecycle")) || {};
+    const sample = (data.sample || []).map((item) =>
+      (item.kind || "") + " " + (item.days || 0) + "天 · " + (item.content || "")).join("\n");
+    toast("会休眠 " + (data.dormant || 0) + " 条、过期 " + (data.expired || 0) +
+      " 条" + (sample ? "；例如：\n" + sample : ""));
+  } catch (error) { toast("预览失败：" + error.message, true); }
+});
+document.getElementById("btnLifecycleRun").addEventListener("click", async () => {
+  if (!window.confirm("现在按当前 TTL 整理一次（休眠/过期/清理）？")) return;
+  try {
+    const data = objectFrom(await call("lifecycle/run", {})) || {};
+    toast("已整理：休眠 " + (data.dormant || 0) + " 条，过期 " + (data.expired || 0) +
+      " 条，清理 " + (data.purged || 0) + " 条");
+    loadLifecycleStat();
+  } catch (error) { toast("整理失败：" + error.message, true); }
+});
+loadLifecycleStat();
 document.getElementById("btnReload").addEventListener("click", loadProfiles);
 document.getElementById("search").addEventListener("input", () => {
   clearTimeout(window._st);

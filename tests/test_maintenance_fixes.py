@@ -20,18 +20,8 @@ BOT = "b"
 UID = "302578963"
 
 
-class FakeLogs:
-    def __init__(self):
-        self.calls = []
-
-    def purge_logs(self, bot_id, days):
-        self.calls.append((bot_id, days))
-        return 2
-
-
-class FakeMessages:
-    def compress_messages(self, bot_id, after, days):
-        return {"compressed": 1, "after": after, "days": days}
+# Phase 13 P2：日志/消息桩搬到 tests/fixtures.py（只搬位置，断言不变）
+from fixtures import StubLogs as FakeLogs, StubMessages as FakeMessages  # noqa: E402
 
 
 class MaintenanceWiringTests(unittest.TestCase):
