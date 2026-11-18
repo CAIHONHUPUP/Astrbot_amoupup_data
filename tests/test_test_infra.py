@@ -18,6 +18,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.dirname(os.path.abspath(__file__))
 PLUGINS = os.path.dirname(ROOT)
 PLUGIN_NAMES = ("Astrbot_amoupup_forever", "Astrbot_amoupup_data", "Astrbot_amoupup_watch")
+
+_MISSING_SIBLINGS = [n for n in PLUGIN_NAMES if not os.path.isdir(os.path.join(PLUGINS, n))]
+if _MISSING_SIBLINGS:
+    raise unittest.SkipTest("缺少同级插件仓库（GitHub 只 checkout 当前仓库）: %s" % _MISSING_SIBLINGS)
+
 if TESTS not in sys.path:
     sys.path.insert(0, TESTS)
 
