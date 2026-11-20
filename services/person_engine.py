@@ -44,6 +44,16 @@ except ImportError:  # 顶层导入（测试/脚本）
     )
 
 
+# 这些 uid 不是「某个人」，是陪伴插件写自己记忆时的内部身份：
+#   owner = 还没认出主人时的兜底（金融/日程）
+#   amo   = 她自己（日记 / 主动消息 / 活动流水）
+# 多个人物时不该硬塞给谁，也不该逐条刷 WARN。
+INTERNAL_MEMORY_UIDS = frozenset({"owner", "amo"})
+
+# 一次启动最多列出几个身份，避免一条日志又被刷成长文
+ORPHAN_LOG_LIMIT = 5
+
+
 class PersonEngine:
     """认人/绑定/合并/关系网；画像与记忆各归各的引擎。"""
 
@@ -199,6 +209,12 @@ class PersonEngine:
                 (bot_id, platform, uid, pid, _clean(name, 64), _now()),
             )
             self._backfill_messages(bot_id, platform, uid, pid)
+            # 手工绑定也要把该 uid 下 pid=0 的记忆一起归位：以前只搬聊天记录，
+            # 记忆要等下次启动自愈才动，面板上看起来就是「绑了没反应」。
+            self.conn.execute(
+                "UPDATE memories SET pid=? WHERE bot_id=? AND uid=? AND COALESCE(pid,0)=0",
+                (pid, bot_id, uid),
+            )
             self.conn.commit()
         self.clear_canonical_cache()
         return pid
@@ -584,10 +600,13 @@ class PersonEngine:
           （老库 pid 回填失败时靠这条兜底）；
         - uid 是机器人自己（identity_alias self）：归给消息最多的人；
         - 该 bot 只有一个人物：整库归给他；
-        - 其余不动，只打日志等人来绑。
+        - 多个人物时内部身份（owner / amo）不猜、也不报警：它们本来就不属于某个人；
+        - 其余不动，只按 uid 汇总一条日志等人来绑。
         已经归位（pid>0）的行不会再被选中，所以重复调用是幂等的。
         """
         adopted = 0
+        unresolved: Dict[str, int] = {}
+        internal: Dict[str, int] = {}
         with self.lock:
             rows = self.conn.execute(
                 "SELECT id, bot_id, uid, scope, group_id, idem_key FROM memories "
@@ -624,11 +643,13 @@ class PersonEngine:
                     same_bot = persons_by_bot.get(bot_id, [])
                     if len(same_bot) == 1:
                         pid = same_bot[0]
+                    elif uid in INTERNAL_MEMORY_UIDS:
+                        # 她自己的日记 / 主人兜底身份：多个人时保持 pid=0，
+                        # 谁都不绑（避免把主人的记忆串给别的用户），也不再刷屏。
+                        internal[uid] = internal.get(uid, 0) + 1
+                        continue
                     else:
-                        logger.warning(
-                            "[amo_data] 孤儿记忆未处理：uid=%s 有 %d 个人物，等手工绑定",
-                            uid, len(same_bot),
-                        )
+                        unresolved[uid] = unresolved.get(uid, 0) + 1
                         continue
                 links = [dict(i) for i in self.conn.execute(
                     "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?",
@@ -656,7 +677,78 @@ class PersonEngine:
                 logger.info("[amo_data] 孤儿记忆归位 %d 条" % adopted)
         if adopted:
             self.clear_canonical_cache()
+        if internal:
+            logger.debug(
+                "[amo_data] 内部记忆保持未绑定：%s（她自己的日记/主人兜底，不属于某个人）",
+                ", ".join("%s:%d" % (uid, n) for uid, n in sorted(internal.items())),
+            )
+        if unresolved:
+            shown = sorted(unresolved.items())[:ORPHAN_LOG_LIMIT]
+            detail = "，".join("%s:%d" % (uid, n) for uid, n in shown)
+            if len(unresolved) > ORPHAN_LOG_LIMIT:
+                detail += "，另 %d 个身份" % (len(unresolved) - ORPHAN_LOG_LIMIT)
+            logger.warning(
+                "[amo_data] 孤儿记忆未处理：%d 条（%s），等手工绑定",
+                sum(unresolved.values()), detail,
+            )
         return adopted
+
+
+    def adopt_group_finance_memories(self) -> int:
+        """把旧版「群号当 uid」的金融记忆收回成 owner（不猜是哪个人）。
+
+        旧版 finance_memory_uid() 直接取会话 umo 的尾巴；群聊尾巴是群号，
+        金融记忆就被记成 uid=<群号>、pid=0。这里只认 kind='finance'，改挂到
+        固定内部身份 owner（pid 仍为 0）：既不串给某个用户，finance_recall
+        也能按 owner 兜底找回来。已经手工绑定过的人物 link 优先，不抢。
+        """
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, bot_id, uid, scope, group_id, idem_key FROM memories "
+                "WHERE COALESCE(pid,0)=0 AND kind='finance' "
+                "AND uid NOT IN ('owner', 'amo', 'bot', '')"
+            ).fetchall()
+            if not rows:
+                return 0
+            group_keys = set()
+            for item in self.conn.execute(
+                "SELECT DISTINCT bot_id, umo FROM messages WHERE umo LIKE '%:GroupMessage:%'"
+            ).fetchall():
+                umo = str(item["umo"] or "")
+                if umo and ":" in umo:
+                    group_keys.add((str(item["bot_id"]), umo.rsplit(":", 1)[-1]))
+            linked = {(str(item["bot_id"]), str(item["uid"]))
+                      for item in self.conn.execute(
+                          "SELECT bot_id, uid FROM person_links WHERE pid>0").fetchall()}
+            moved = 0
+            merged = 0
+            for mem in rows:
+                key = (str(mem["bot_id"]), str(mem["uid"]))
+                if key not in group_keys or key in linked:
+                    continue
+                try:
+                    self.conn.execute(
+                        "UPDATE memories SET uid='owner', pid=0 WHERE id=?",
+                        (int(mem["id"]),),
+                    )
+                    moved += 1
+                except sqlite3.IntegrityError:
+                    old = self.conn.execute(
+                        "SELECT id FROM memories WHERE bot_id=? AND uid='owner' AND scope=? "
+                        "AND group_id=? AND idem_key=? LIMIT 1",
+                        (key[0], str(mem["scope"]), str(mem["group_id"]),
+                         str(mem["idem_key"])),
+                    ).fetchone()
+                    self.conn.execute(
+                        "UPDATE memories SET status='merged', superseded_by=? WHERE id=?",
+                        (int(old["id"]) if old else 0, int(mem["id"])),
+                    )
+                    merged += 1
+            if moved or merged:
+                self.conn.commit()
+                logger.info("[amo_data] 群号金融记忆收回 owner：%d 条（合并 %d 条）"
+                            % (moved, merged))
+        return moved
 
 
     def pid_for_uid(self, bot_id: str, uid: str) -> int:
@@ -853,6 +945,7 @@ class PersonEngine:
     def bootstrap(self) -> None:
         """启动自愈（原 store.__init__ 里做的那几件事）。失败只告警，不挡启动。"""
         for fn in (self.normalize_identities, self.repair_persons,
+                   self.adopt_group_finance_memories,
                    self.adopt_orphan_memories, self.merge_ghost_persons):
             try:
                 fn()

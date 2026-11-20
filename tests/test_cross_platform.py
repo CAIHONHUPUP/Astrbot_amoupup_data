@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import support.store_fixture as store_mod  # noqa: E402
 from support.store_fixture import DataStore, normalize_platform  # noqa: E402
+from utils import clock as _amo_clock  # noqa: E402
 
 BOT = "bot1"
 QQ_UID = "302578963"
@@ -85,7 +86,7 @@ class PackageImportTests(unittest.TestCase):
             "store 里的时间解析必须用相对导入+兜底，否则日期加权整段失效",
         )
         from datetime import date, timedelta
-        yesterday = date.today() - timedelta(days=1)
+        yesterday = _amo_clock.today() - timedelta(days=1)
         span = store_mod._parse_time_span("昨天我们干了什么")
         self.assertTrue(span)
         self.assertEqual((span["month"], span["day"]), (yesterday.month, yesterday.day))

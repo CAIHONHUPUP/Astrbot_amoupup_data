@@ -121,7 +121,7 @@ class DateDigestPriorityTests(unittest.TestCase):
         from datetime import date, timedelta
         self.tmp = _tmpdir()
         self.store = DataStore(os.path.join(self.tmp, "a.db"), settings={"auto_dedupe": False})
-        self.tag = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        self.tag = (amo_clock.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     def tearDown(self):
         self.store.close()

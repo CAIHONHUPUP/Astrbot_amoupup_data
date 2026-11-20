@@ -13,6 +13,11 @@ import asyncio
 from typing import Any, Dict
 
 try:
+    from ..utils.clock import now as _clock_now
+except ImportError:  # 顶层导入（测试/脚本）
+    from utils.clock import now as _clock_now
+
+try:
     from ..utils.text_process import _bot_filter, logger
 except ImportError:  # 顶层导入（测试/脚本）
     from utils.text_process import _bot_filter, logger
@@ -179,8 +184,7 @@ class MaintenanceEngine:
     # ---------- 周期任务 ----------
     async def _maybe_weekly_cleanup(self, bot_id: str) -> Dict[str, Any]:
         """每周只跑一次：合并同天摘要、近重复去重、归档低价值老记忆。"""
-        import time
-        week = time.strftime("%G-W%V", time.localtime())
+        week = _clock_now().strftime("%G-W%V")
         key = "cleanup_week:" + week
         try:
             if self.plugin.cache.cache_get(bot_id, key):
@@ -215,8 +219,7 @@ class MaintenanceEngine:
         """每天自动备份一次数据库，保留 backup_keep 份。"""
         if not self.settings.get("backup_daily", True):
             return ""
-        import time
-        day = time.strftime("%Y-%m-%d", time.localtime())
+        day = _clock_now().strftime("%Y-%m-%d")
         key = "backup_day:" + day
         try:
             if self.plugin.cache.cache_get(bot_id, key):

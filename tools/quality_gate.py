@@ -375,10 +375,10 @@ def check_function_sizes():
 
 
 def check_tests():
-
-    cmd = [sys.executable, "run_tests.py"]
+    """全量单测：和 CI 同一口径（pytest），不再依赖 run_tests.py 这个旧入口。"""
+    cmd = [sys.executable, "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider"]
     subprocess.run(cmd, cwd=ROOT, check=True)
-    return "tests ok"
+    return "tests ok (pytest)"
 
 
 def check_mypy_strict():

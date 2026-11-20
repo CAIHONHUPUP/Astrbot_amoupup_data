@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 #: RRF 经典平滑常数（Cormack et al. 2009）；越大越平权
 RRF_K = 60
@@ -66,7 +66,7 @@ class VectorIndex:
         self._built = False
         self._ids: List[int] = []
         self._vecs: Dict[int, List[float]] = {}
-        self._matrix = None       # numpy 归一化矩阵（行=id）
+        self._matrix: Any = None  # numpy 归一化矩阵（行=id）；没装 numpy 时是 None
         self._row_of: Dict[int, int] = {}
 
     def invalidate(self) -> None:

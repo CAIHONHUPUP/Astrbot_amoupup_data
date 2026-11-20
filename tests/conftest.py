@@ -28,6 +28,21 @@ except ImportError:  # pragma: no cover - stub 缺失时退回旧行为
     pass
 
 import time as _time
+
+# 收集期就冻结：有的测试在模块级算 DAY = today_str()，必须在导入前钉住日期。
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+try:
+    from datetime import datetime as _frozen_dt
+    try:
+        from utils.clock import freeze as _freeze_clock
+    except ImportError:  # 能陪是平铺模块
+        from clock import freeze as _freeze_clock
+    if os.environ.get("AMO_NO_FREEZE") != "1":
+        _freeze_clock(_frozen_dt(2026, 11, 18, 15, 0))
+except Exception:  # cleanup: 导入失败不影响收集
+    pass
+
 if hasattr(_time, "tzset"):
     # 只有 Unix 的 tzset 才真的能换时区。Windows 上「只设 TZ 不 tzset」会让 C 运行库
     # 把 IANA 名字当非法值回落 UTC，datetime.now() 直接差 8 小时（2026-11-18 本地
@@ -154,3 +169,26 @@ if pytest is not None:
             yield root
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+if pytest is not None:
+    @pytest.fixture(autouse=True)
+    def _amo_frozen_clock():
+        '''全量测试统一冻结在 2026-11-18 15:00（弱点2：时间耦合收口）。
+
+        以前「今天」直接读墙钟：2026-11-19 一过，守护 3 项按 11-18 写死的断言立刻红。
+        每个用例前 freeze、结束后 unfreeze；用例内部还可以再 freeze 到别的时刻。
+        三个插件的 tests/conftest.py 必须逐字节一致（test_test_infra 会校验 sha256）。
+        '''
+        from datetime import datetime as _dt
+        try:
+            from utils.clock import freeze as _freeze, unfreeze as _unfreeze
+        except ImportError:  # 能陪是平铺模块：clock.py 在插件根
+            from clock import freeze as _freeze, unfreeze as _unfreeze
+        if os.environ.get("AMO_NO_FREEZE") == "1":  # 排查用：临时关掉冻结，跑真实墙钟
+            yield
+            return
+        _freeze(_dt(2026, 11, 18, 15, 0))
+        try:
+            yield
+        finally:
+            _unfreeze()

@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -15,6 +16,7 @@ import astrbot_stub  # noqa: E402
 
 astrbot_stub.install()
 
+from services import person_engine  # noqa: E402
 from support.store_fixture import DataStore  # noqa: E402
 
 BOT = "bot1"
@@ -183,6 +185,140 @@ class PersonIdMemoryTests(unittest.TestCase):
             "SELECT pid FROM memories WHERE content LIKE '%不确定%'"
         ).fetchone()
         self.assertEqual(int(row["pid"]), 0, "多个人时不猜，避免串味")
+
+    # ⑩-2 多个人物时，内部身份（owner/amo）不逐条刷 WARN，也不乱绑
+    def test_internal_orphans_stay_unbound_and_quiet(self):
+        self._link_both()
+        self.store.link_identity(BOT, "aiocqhttp", "10001", 0, "路人")
+        with self.store.lock:
+            for uid in ("amo", "owner"):
+                for i in range(3):
+                    self.store.conn.execute(
+                        "INSERT INTO memories(bot_id, uid, content, created_at, last_hit_at, importance) "
+                        "VALUES(?,?,?,?,?,?)",
+                        (BOT, uid, "内部记忆 %s %d" % (uid, i),
+                         1_700_000_000, 1_700_000_000, 0.5),
+                    )
+            self.store.conn.commit()
+        with mock.patch.object(person_engine, "logger") as log:
+            self.assertEqual(0, self.store.persons.adopt_orphan_memories())
+        log.warning.assert_not_called()
+        rows = self.store.conn.execute(
+            "SELECT uid, pid FROM memories ORDER BY id"
+        ).fetchall()
+        self.assertEqual({0}, {int(r["pid"]) for r in rows}, "内部身份不许塞给某个用户")
+        self.assertEqual({"amo", "owner"}, {str(r["uid"]) for r in rows})
+
+    # ⑩-3 其它孤儿按 uid 汇总成一条 WARN，而不是一条一行
+    def test_unknown_orphans_warn_once_with_summary(self):
+        self._link_both()
+        self.store.link_identity(BOT, "aiocqhttp", "10001", 0, "路人")
+        with self.store.lock:
+            for i in range(4):
+                self.store.conn.execute(
+                    "INSERT INTO memories(bot_id, uid, content, created_at, last_hit_at, importance) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (BOT, "stranger", "陌生孤儿 %d" % i, 1_700_000_000, 1_700_000_000, 0.5),
+                )
+            self.store.conn.commit()
+        with mock.patch.object(person_engine, "logger") as log:
+            self.assertEqual(0, self.store.persons.adopt_orphan_memories())
+        self.assertEqual(1, log.warning.call_count, "4 条孤儿只许弹 1 条 WARN")
+        args = log.warning.call_args[0]
+        rendered = str(args[0]) % args[1:]
+        self.assertIn("4 条", rendered)
+        self.assertIn("stranger:4", rendered)
+        self.assertEqual(4, int(self.store.conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE pid=0").fetchone()[0]))
+
+    # ⑩-4 只有一个人物时保持原行为：内部身份也归给他（老单机库不回退）
+    def test_internal_orphan_still_adopted_with_single_person(self):
+        pid = self._link_both()
+        with self.store.lock:
+            self.store.conn.execute(
+                "INSERT INTO memories(bot_id, uid, content, created_at, last_hit_at, importance) "
+                "VALUES(?,?,?,?,?,?)",
+                (BOT, "amo", "她自己的日记：到工位了", 1_700_000_000, 1_700_000_000, 0.5),
+            )
+            self.store.conn.commit()
+        self.assertEqual(1, self.store.persons.adopt_orphan_memories())
+        row = self.store.conn.execute(
+            "SELECT pid, uid FROM memories WHERE content LIKE '%到工位%'"
+        ).fetchone()
+        self.assertEqual(int(row["pid"]), int(pid))
+        self.assertEqual(str(row["uid"]), LARK, "单人物时仍归一成主 uid")
+
+    # ⑩-5 手工绑定某个 uid：该 uid 下 pid=0 的记忆立刻归位，不用等重启
+    def test_link_identity_adopts_orphan_memories_immediately(self):
+        pid = self._link_both()
+        with self.store.lock:
+            self.store.conn.execute(
+                "INSERT INTO memories(bot_id, uid, content, created_at, last_hit_at, importance) "
+                "VALUES(?,?,?,?,?,?)",
+                (BOT, "999", "手工绑定的孤儿", 1_700_000_000, 1_700_000_000, 0.5),
+            )
+            self.store.conn.commit()
+        self.store.link_identity(BOT, "aiocqhttp", "999", pid, "路人")
+        row = self.store.conn.execute(
+            "SELECT pid, uid FROM memories WHERE content LIKE '%手工绑定%'"
+        ).fetchone()
+        self.assertEqual(int(row["pid"]), int(pid), "绑完记忆要马上归位")
+        self.assertEqual(str(row["uid"]), "999")
+
+    # ⑩-6 旧版「群号当 uid」的金融记忆：收回 owner，不绑给某个用户
+    def test_group_finance_memories_moved_to_owner(self):
+        self._link_both()
+        self.store.link_identity(BOT, "aiocqhttp", "10001", 0, "路人")
+        group = "1055679275"
+        with self.store.lock:
+            self.store.conn.execute(
+                "INSERT INTO messages(bot_id, umo, uid, role, content, created_at, pid) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (BOT, "aiocqhttp:GroupMessage:" + group, "10001", "user", "群里说话",
+                 1_700_000_000, 0),
+            )
+            self.store.conn.execute(
+                "INSERT INTO memories(bot_id, uid, content, kind, created_at, last_hit_at, importance) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (BOT, group, "支出 200 元", "finance", 1_700_000_000, 1_700_000_000, 0.5),
+            )
+            self.store.conn.commit()
+        self.assertEqual(1, self.store.persons.adopt_group_finance_memories())
+        row = self.store.conn.execute(
+            "SELECT uid, pid FROM memories WHERE content LIKE '%支出%'"
+        ).fetchone()
+        self.assertEqual(str(row["uid"]), "owner", "群号不是人，收回 owner")
+        self.assertEqual(int(row["pid"]), 0)
+        self.assertEqual(0, self.store.persons.adopt_group_finance_memories(), "重复调用幂等")
+
+    # ⑩-7 已手工绑定的群号、非金融记忆都不抢
+    def test_group_finance_migration_skips_linked_and_other_kinds(self):
+        pid = self._link_both()
+        group = "1055679275"
+        self.store.link_identity(BOT, "aiocqhttp", group, pid, "群")
+        with self.store.lock:
+            self.store.conn.execute(
+                "INSERT INTO messages(bot_id, umo, uid, role, content, created_at, pid) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (BOT, "aiocqhttp:GroupMessage:" + group, "10001", "user", "群里说话",
+                 1_700_000_000, 0),
+            )
+            self.store.conn.execute(
+                "INSERT INTO memories(bot_id, uid, content, kind, created_at, last_hit_at, importance) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (BOT, group, "群里记的账", "finance", 1_700_000_000, 1_700_000_000, 0.5),
+            )
+            self.store.conn.execute(
+                "INSERT INTO memories(bot_id, uid, content, kind, created_at, last_hit_at, importance) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (BOT, group, "群里的事实", "fact", 1_700_000_000, 1_700_000_000, 0.5),
+            )
+            self.store.conn.commit()
+        self.assertEqual(0, self.store.persons.adopt_group_finance_memories())
+        rows = self.store.conn.execute(
+            "SELECT content, uid FROM memories ORDER BY id"
+        ).fetchall()
+        self.assertEqual({group}, {str(r["uid"]) for r in rows}, "已绑定的不动，非金融的不动")
 
     # ⑪ 机器人自己 uid 下的记忆（alias self）归给消息最多的人
     def test_self_uid_memories_go_to_owner(self):

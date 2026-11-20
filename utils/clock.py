@@ -151,14 +151,62 @@ def applied():
     return bool(_applied.get("ok"))
 
 
+#: 冻结点（测试/回放）：None = 真实墙钟；float = 固定 epoch 秒。见 freeze()/unfreeze()。
+_frozen: dict = {"ts": None}
+
+
+def freeze(ts=None):
+    """把「现在」固定到某个时刻（测试/回放用）。
+
+    ts 可以是 datetime、epoch 秒或 None（= 固定到此刻）。只影响本模块的
+    now/now_ts/today/today_str，不改进程时区、不动 configure() 的状态；
+    重复调用覆盖上一次的冻结点。返回冻结后的「现在」。
+    """
+    if ts is None:
+        value = _time.time()
+    elif isinstance(ts, datetime):
+        value = ts.timestamp()
+    else:
+        value = float(ts)
+    _frozen["ts"] = value
+    return now()
+
+
+def unfreeze():
+    """解除冻结，恢复真实墙钟。"""
+    _frozen["ts"] = None
+
+
+def frozen():
+    """当前冻结点（epoch 秒）；没冻返回 None。"""
+    return _frozen["ts"]
+
+
+def _at(ts, explicit=""):
+    """epoch 秒 → 目标时区的 naive datetime。"""
+    zone = get_zone(resolve_name(explicit))
+    if zone is None:
+        return datetime.fromtimestamp(float(ts))
+    return datetime.fromtimestamp(float(ts), zone).replace(tzinfo=None)
+
+
 def now(explicit=""):
-    """目标时区下的「现在」（naive）。"""
+    """目标时区下的「现在」（naive）；冻结点优先。"""
+    if _frozen["ts"] is not None:
+        return _at(_frozen["ts"], explicit)
     if not explicit and _applied.get("ok"):
         return datetime.now()
     zone = get_zone(resolve_name(explicit))
     if zone is None:
         return datetime.now()
     return datetime.now(zone).replace(tzinfo=None)
+
+
+def now_ts() -> float:
+    """epoch 秒：与 time.time() 同值，作为插件内唯一「现在」的秒级入口（冻结点优先）。"""
+    if _frozen["ts"] is not None:
+        return float(_frozen["ts"])
+    return _time.time()
 
 
 def today(explicit=""):

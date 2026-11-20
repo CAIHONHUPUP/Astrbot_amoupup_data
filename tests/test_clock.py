@@ -98,6 +98,7 @@ class SourceGuardTests(unittest.TestCase):
 class NoTzsetTests(unittest.TestCase):
     def test_configure_does_not_poison_tz(self):
         """Windows 上写 TZ=Asia/Shanghai 会让 CRT 把本地时间当 UTC，绝不能写。"""
+        clock.unfreeze()  # 本用例比较真实墙钟，不参与全量时间冻结
         prev = os.environ.get("TZ")
         try:
             clock.configure("Asia/Shanghai")
