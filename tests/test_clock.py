@@ -26,6 +26,7 @@ from utils import clock  # noqa: E402
 @unittest.skipUnless(hasattr(time, "tzset"), "Windows 没有 tzset，进程级时区改不了")
 class ClockTests(unittest.TestCase):
     def setUp(self):
+        clock.unfreeze()  # 本类比较真实墙钟，不参与 conftest 的全量时间冻结
         self._prev = os.environ.get("TZ")
         os.environ["TZ"] = "UTC"   # 模拟线上 AstrBot 容器
         time.tzset()
