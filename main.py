@@ -213,7 +213,9 @@ class AmoDataPlugin(WebAPIMixin, Star):
         self.compression = CompressionEngine(self.db, self.settings, memory=self.memory)
         self.messages = MessageEngine(self.db, self.settings)
         try:
-            self.messages._migrate_group_umos()
+            _group_report = self.messages._migrate_group_umos()
+            if _group_report.get("merged"):
+                logger.info("[amo_data] 群会话 ID 合并: %s", _group_report)
         except Exception as exc:
             logger.debug("[amo_data] 群会话 ID 迁移失败: %s", exc)
         self.logs = LogEngine(self.db)

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import sqlite3
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -85,22 +87,44 @@ class MessageEngine:
         (("傍晚", "晚上", "今晚", "昨晚", "夜里", "深夜"), 18, 24),
     )
 
-    def _migrate_group_umos(self) -> int:
-        """历史错误 umo（带 sender 尾段）合并到规范群 ID，避免面板一 group 变多份。"""
+    def _migrate_group_umos(self, dry_run: bool = False) -> dict:
+        """历史错误 umo（带 sender 尾段）合并到规范群 ID，避免面板一 group 变多份。
+
+        先备份 DB、再事务更新，并把报告写进 store_meta；dry_run 只统计不改库。
+        """
         with self.lock:
             rows = self.conn.execute(
                 "SELECT DISTINCT umo FROM messages WHERE umo LIKE '%:GroupMessage:%'"
             ).fetchall()
-            changed = 0
+            changes = []
             for row in rows:
                 raw = str(row["umo"] or "")
                 fixed = normalize_group_umo(raw)
                 if fixed and fixed != raw:
+                    changes.append((raw, fixed))
+            report = {"scanned": len(rows), "merged": len(changes),
+                      "unknown": 0, "dry_run": bool(dry_run)}
+            if changes and not dry_run:
+                try:
+                    path = str(getattr(self.db, "path", "") or "")
+                    if path and os.path.isfile(path):
+                        stamp = _now()
+                        shutil.copy2(path, path + ".bak-group-%s" % stamp)
+                except Exception as exc:
+                    logger.debug("[amo_data] 群 umo 迁移备份失败: %s", exc)
+                for raw, fixed in changes:
                     self.conn.execute("UPDATE messages SET umo=? WHERE umo=?", (fixed, raw))
-                    changed += 1
-            if changed:
                 self.conn.commit()
-            return changed
+            try:
+                self.conn.execute(
+                    "INSERT INTO store_meta(key, value) VALUES('group_umo_migration', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (json.dumps(report, ensure_ascii=False),),
+                )
+                self.conn.commit()
+            except Exception as exc:
+                logger.debug("[amo_data] 写群 umo 迁移报告失败: %s", exc)
+            return report
 
     def add_message(self, bot_id: str, umo: str, uid: str = "", name: str = "",
                     role: str = "user", content: str = "", platform: str = "",
