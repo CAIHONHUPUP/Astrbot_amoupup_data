@@ -1,0 +1,237 @@
+{
+  "add_log": [
+    "bot_id",
+    "level",
+    "tag",
+    "content"
+  ],
+  "add_message": [
+    "bot_id",
+    "umo",
+    "uid",
+    "name",
+    "role",
+    "content",
+    "platform",
+    "message_id",
+    "group_name"
+  ],
+  "archive_stale": [
+    "bot_id",
+    "days",
+    "max_importance",
+    "apply"
+  ],
+  "backup_now": [
+    "keep"
+  ],
+  "cache_delete": [
+    "bot_id",
+    "key"
+  ],
+  "cache_get": [
+    "bot_id",
+    "key"
+  ],
+  "cache_set": [
+    "bot_id",
+    "key",
+    "value",
+    "ttl"
+  ],
+  "compress_memories": [
+    "bot_id",
+    "apply"
+  ],
+  "consolidate_semantic": [
+    "bot_id"
+  ],
+  "correct": [
+    "bot_id",
+    "uid",
+    "hint",
+    "right_content",
+    "scope",
+    "group_id",
+    "platform"
+  ],
+  "delete_memory": [
+    "bot_id",
+    "memory_id"
+  ],
+  "delete_message": [
+    "bot_id",
+    "message_id"
+  ],
+  "delete_profile": [
+    "bot_id",
+    "uid"
+  ],
+  "delete_relation": [
+    "bot_id",
+    "a_uid",
+    "b_uid"
+  ],
+  "export_snapshot": [
+    "bot_id"
+  ],
+  "get_profile": [
+    "bot_id",
+    "uid"
+  ],
+  "import_snapshot": [
+    "data"
+  ],
+  "list_backups": [],
+  "list_logs": [
+    "bot_id",
+    "level",
+    "limit"
+  ],
+  "list_memories": [
+    "bot_id",
+    "uid",
+    "limit"
+  ],
+  "list_messages": [
+    "bot_id",
+    "umo",
+    "limit",
+    "uid"
+  ],
+  "list_persons": [
+    "bot_id",
+    "keyword",
+    "limit"
+  ],
+  "list_profiles": [
+    "bot_id",
+    "keyword",
+    "limit"
+  ],
+  "list_relations": [
+    "bot_id",
+    "uid"
+  ],
+  "maintenance": [
+    "bot_id",
+    "chat_days",
+    "compress_after",
+    "log_days"
+  ],
+  "messages_between": [
+    "bot_id",
+    "start_ts",
+    "end_ts",
+    "uid",
+    "limit"
+  ],
+  "messages_since": [
+    "bot_id",
+    "uid",
+    "since_ts",
+    "limit",
+    "umo"
+  ],
+  "nightly_apply": [
+    "meta",
+    "facts",
+    "ids"
+  ],
+  "nightly_memory_candidates": [
+    "hours",
+    "limit"
+  ],
+  "person_context": [
+    "bot_id",
+    "platform",
+    "uid",
+    "limit"
+  ],
+  "person_detail": [
+    "bot_id",
+    "pid"
+  ],
+  "person_link": [
+    "bot_id",
+    "platform",
+    "uid",
+    "pid",
+    "name"
+  ],
+  "person_merge": [
+    "bot_id",
+    "keep_pid",
+    "drop_pid"
+  ],
+  "person_unlink": [
+    "bot_id",
+    "platform",
+    "uid"
+  ],
+  "protocol_info": [],
+  "purge_logs": [
+    "bot_id",
+    "days"
+  ],
+  "recall": [
+    "bot_id",
+    "uid",
+    "query",
+    "limit",
+    "scope",
+    "group_id",
+    "platform",
+    "pid",
+    "tags"
+  ],
+  "recall_messages": [
+    "bot_id",
+    "query",
+    "umo",
+    "uid",
+    "limit"
+  ],
+  "remember": [
+    "bot_id",
+    "uid",
+    "content",
+    "kind",
+    "importance",
+    "scope",
+    "group_id",
+    "idem_key",
+    "subject",
+    "platform",
+    "tags"
+  ],
+  "resolve_person": [
+    "bot_id",
+    "platform",
+    "uid",
+    "name"
+  ],
+  "restore_backup": [
+    "name",
+    "bot_id"
+  ],
+  "save_profile": [
+    "bot_id",
+    "uid",
+    "name",
+    "alias",
+    "relation",
+    "remark",
+    "platform"
+  ],
+  "save_relation": [
+    "bot_id",
+    "a_uid",
+    "b_uid",
+    "relation",
+    "note"
+  ],
+  "stats": [
+    "bot_id"
+  ]
+}

@@ -1,0 +1,19 @@
+[run]
+source = .
+omit =
+    tests/*
+    tools/*
+    __pycache__/*
+    _test_tmp/*
+    work/*
+    store_types.py
+    run_tests.py
+
+[report]
+# 测试会临时生成/删除探针文件，报告时找不到源码直接跳过（2026-11-19）。
+ignore_errors = true
+# 类型检查之外再加覆盖率底线：3.0.0 加了身份/群名/回填一批测试后实测 89%，
+# 底线 87% → 88%；2026-11-18 排除 work/ 离线脚本后实测 86%，底线 86（只许往上调）
+fail_under = 90
+show_missing = True
+skip_covered = True
