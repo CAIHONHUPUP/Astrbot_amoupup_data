@@ -160,10 +160,13 @@ class AmoDataPlugin(WebAPIMixin, Star):
         """只读：查看记忆库规模（/mem_stats）。"""
         try:
             data = await self.mem.stats(self._bot_id({}, write=False)) or {}
-            text = ("记忆 %s 条（活跃 %s）· 画像 %s · 人物 %s · 消息 %s · 关系 %s"
-                    % (data.get("memories", 0), data.get("memories_active", 0),
+            # task-27：聊天只算 user/bot，摘要单列；记忆同时给活跃/总数，别只报 917
+            text = ("记忆 %s 条（活跃 %s / 共 %s）· 画像 %s · 人物 %s · 聊天 %s（摘要 %s 单列）· 关系 %s"
+                    % (data.get("memories_active", 0), data.get("memories_active", 0),
+                       data.get("memories", 0),
                        data.get("profiles", 0), data.get("persons", 0),
-                       data.get("messages", 0), data.get("relations", 0)))
+                       data.get("messages_chat", data.get("messages", 0)),
+                       data.get("messages_summary", 0), data.get("relations", 0)))
         except Exception as exc:
             logger.warning("[amo_data] /mem_stats 失败: %s" % exc)
             text = "记忆库统计失败：%s" % exc

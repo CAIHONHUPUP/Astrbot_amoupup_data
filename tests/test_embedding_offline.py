@@ -67,13 +67,25 @@ class EmbeddingOfflineTests(unittest.TestCase):
         self.assertEqual(self.store._embed("他喜欢吃番茄牛腩"), [])
         self.assertEqual(self.logger.warnings, [])
 
+    def _related_warnings(self):
+        """只数这个 store 的告警（bge-m3 / 127.0.0.1:9）。
+
+        logger 是模块级全局：别的测试留下的 embedding worker 线程还在跑时，
+        它也会往同一个 logger 写告警。不过滤的话「只提醒一次」会被并发告警
+        干扰成全量跑必红、单跑必过。
+        """
+        return [w for w in self.logger.warnings
+                if "退回关键词" in w and "bge-m3" in w and "127.0.0.1:9" in w]
+
     def test_unreachable_service_warns_only_once(self):
+        self.logger.warnings.clear()
         self.assertEqual(self.store._embed("他喜欢吃番茄牛腩"), [])
-        self.assertEqual(len(self.logger.warnings), 1)
-        self.assertIn("退回关键词", self.logger.warnings[0])
+        related = self._related_warnings()
+        self.assertEqual(len(related), 1, self.logger.warnings)
+        self.assertIn("退回关键词", related[0])
         # 60 秒退避内的第二次调用：不再尝试，也不再提醒
         self.assertEqual(self.store._embed("他又说了一句"), [])
-        self.assertEqual(len(self.logger.warnings), 1)
+        self.assertEqual(len(self._related_warnings()), 1)
 
     def test_enabled_state_is_reported_in_stats(self):
         stats = self.store.embedding_stats()

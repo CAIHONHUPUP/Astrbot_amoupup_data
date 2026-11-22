@@ -263,4 +263,21 @@ class MaintenanceEngine:
                     out["memories_" + status] = int(row["c"] or 0) if row else 0
             except Exception as exc:
                 logger.debug("[amo_data] optional step failed: %r", exc)
+            # task-27：面板“聊天”只算真实对话，摘要（role=summary）单列。
+            # 之前 messages 全表 = 436，其中 146 条是摘要，真实聊天 290（高估 33.5%）。
+            for name, condition in (
+                ("messages_chat", "role IN ('user','bot')"),
+                ("messages_summary", "role='summary'"),
+            ):
+                try:
+                    row = self.db.conn.execute(
+                        "SELECT COUNT(*) AS c FROM messages WHERE " + condition + where,
+                        params if where else (),
+                    ).fetchone()
+                    out[name] = int(row["c"] or 0) if row else 0
+                except Exception as exc:
+                    out[name] = 0
+                    logger.debug("[amo_data] optional step failed: %r", exc)
+            # 兜底：老库 role 可能大小写/空白不一致时，保证 chat+summary 不超过总数
+            out["messages_chat"] = max(0, min(out.get("messages_chat", 0), out.get("messages", 0)))
         return out

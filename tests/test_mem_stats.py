@@ -37,7 +37,9 @@ def _plugin(mem):
 def test_mem_stats_formats_counts():
     out = asyncio.run(_collect(_plugin(FakeMem())))
     assert len(out) == 1
-    for frag in ("记忆 7 条", "活跃 5", "画像 2", "人物 3", "消息 9", "关系 1"):
+    # task-27：记忆给“活跃/总数”，聊天只算真实对话、摘要单列
+    for frag in ("记忆 5 条", "活跃 5 / 共 7", "画像 2", "人物 3",
+                 "聊天 9", "摘要 0 单列", "关系 1"):
         assert frag in out[0], out[0]
 
 def test_mem_stats_never_raises():

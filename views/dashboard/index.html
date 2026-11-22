@@ -645,9 +645,14 @@ async function loadStatus() {
   try {
     const data = objectFrom(await call("status")) || {};
     const counts = data.counts || {};
+    // task-27：聊天只算真实对话（摘要单列）；记忆给 活跃/总数，避免“917/770”标签歧义
+    const chatCount = counts.messages_chat != null ? counts.messages_chat : (counts.messages || 0);
     document.getElementById("stat").textContent =
-      "画像 " + (counts.profiles || 0) + " · 记忆 " + (counts.memories || 0) +
-      " · 关系 " + (counts.relations || 0) + " · 聊天 " + (counts.messages || 0) +
+      "画像 " + (counts.profiles || 0) +
+      " · 记忆 " + (counts.memories_active != null
+        ? counts.memories_active + "/" + (counts.memories || 0) : (counts.memories || 0)) +
+      " · 关系 " + (counts.relations || 0) + " · 聊天 " + chatCount +
+      "（摘要 " + (counts.messages_summary || 0) + " 单列）" +
       " · v" + (data.version || "");
   } catch (error) {
     document.getElementById("stat").textContent = "后端未就绪";
@@ -756,9 +761,20 @@ function buildDayTree(items, renderItem, opts) {
   return wrap;
 }
 /* ---------- 会话分组：先分「群聊 / 私聊」，再按 年 → 月 → 日 ---------- */
+/* 群会话 ID 唯一归一（task-27）：与后端 services/message_engine.normalize_group_umo
+   同一规则。入库、群列表、聊天页、群聊页、改名全走这里，禁止再写第二套正则。 */
+function normalizeGroupUmo(umo) {
+  const text = String(umo || "");
+  const matched = text.match(/:GroupMessage:([^:]+)/);
+  if (!matched) return text;
+  let gid = matched[1];
+  const head = gid.split("_")[0];
+  if (/^d+$/.test(head)) gid = head;
+  return text.slice(0, matched.index) + ":GroupMessage:" + gid;
+}
 function sessionLabel(list) {
   const item = Array.isArray(list) ? (list[0] || {}) : (list || {});
-  const umo = String((item && item.umo) || "");
+  const umo = normalizeGroupUmo(String((item && item.umo) || ""));
   const plat = String((item && (item.label || item.platform)) || "");
   const group = umo.match(/:GroupMessage:([^:]+)$/);
   if (group) return "群聊 · " + (plat ? plat + " " : "") + group[1];
@@ -775,7 +791,8 @@ function buildSessionTree(items, renderItem, opts) {
   }
   const groups = new Map();
   items.forEach((item) => {
-    const key = String((item && item.umo) || (item && item.platform) || "unknown");
+    const key = normalizeGroupUmo(
+      String((item && item.umo) || (item && item.platform) || "unknown"));
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -1897,24 +1914,19 @@ document.getElementById("btnChatClear").addEventListener("click", async () => {
 
 /* ---------- 群聊（群名 → 年 → 月 → 日） ---------- */
 function groupKey(umo) {
-  const text = String(umo || "");
-  const matched = text.match(/:GroupMessage:([^:]+)/);
-  if (!matched) return text;
-  let gid = matched[1];
-  const head = gid.split("_")[0];
-  if (/^\d+$/.test(head)) gid = head;
-  return text.slice(0, matched.index) + ":GroupMessage:" + gid;
+  // 唯一归一化在 normalizeGroupUmo（见上）；这里只是旧名字的别名，禁止再写第二套规则。
+  return normalizeGroupUmo(umo);
 }
 
 function groupLabel(list) {
   const items = Array.isArray(list) ? list : [list || {}];
   const item = items[0] || {};
-  const umo = String(item.umo || "");
+  const umo = normalizeGroupUmo(String(item.umo || ""));
   const plat = String(item.label || item.platform || "");
   const matched = umo.match(/:GroupMessage:([^:]+)$/);
   // 群名可能只在某几条消息上有（她自己的回复就没有），扫一遍取第一个非空的
   const named = items.find((one) => String((one && one.group_name) || "").trim());
-  // 手动起的名字 > 平台给的群名 > 群号
+  // 手动起的名字 > 平台给的群名 > 群号；手动名按归一化 key 查（改名后立即生效）
   const manual = String(((window._groupNames || {})[umo]) || "").trim();
   const name = manual || String((named && named.group_name) || "").trim()
     || (matched ? "群号 " + matched[1] : "未知群");
@@ -1925,7 +1937,13 @@ async function fetchGroupMessages(force) {
   // 群消息一次拉全（服务端已按群过滤），搜索在本地过滤，不再每敲一个字就请求一遍
   if (!force && Array.isArray(window._groupMsgs)) return window._groupMsgs;
   const data = objectFrom(await call("messages", { kind: "group", limit: 800 })) || {};
-  window._groupMsgs = Array.isArray(data.items) ? data.items : [];
+  // 统一群 umo（同一 normalizeGroupUmo）：同群多种 umo 形态合并成一个群节点
+  window._groupMsgs = (Array.isArray(data.items) ? data.items : []).map((it) => {
+    if (!it || typeof it !== "object") return it;
+    const umo = String(it.umo || "");
+    if (!umo.includes(":GroupMessage:")) return it;
+    return Object.assign({}, it, { umo: normalizeGroupUmo(umo) });
+  });
   return window._groupMsgs;
 }
 
@@ -1935,7 +1953,7 @@ function renderGroupOptions(items) {
   const keep = select.value;
   const map = new Map();
   items.forEach((it) => {
-    const key = groupKey(it && it.umo);
+    const key = normalizeGroupUmo(it && it.umo);
     if (!key) return;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(it);
@@ -1972,7 +1990,7 @@ async function loadGroups(force) {
       .filter((it) => String((it && it.umo) || "").includes(":GroupMessage:"));
     renderGroupOptions(all);
     const picked = (document.getElementById("groupPick").value || "").trim();
-    let items = picked ? all.filter((it) => groupKey(it && it.umo) === picked) : all;
+    let items = picked ? all.filter((it) => normalizeGroupUmo(it && it.umo) === picked) : all;
     if (keyword) {
       items = items.filter((it) =>
         String((it && it.umo) || "").toLowerCase().includes(keyword)
