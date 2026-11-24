@@ -20,7 +20,6 @@ KIND_DORMANT_DAYS: Dict[str, Optional[float]] = {
     "tool_memory": 45.0,
     "social_news": 30.0,
     "work": 60.0,
-    "finance": 30.0,
     "finish": 30.0,
     "conversation_summary": 180.0,
     "daily_digest": 180.0,
@@ -43,7 +42,6 @@ KIND_EXPIRE_DAYS: Dict[str, Optional[float]] = {
     "proactive_message": 365.0,
     "self_action": 365.0,
     "social_news": 180.0,
-    "finance": 365.0,
 }
 
 #: 默认（未知 kind）：一年休眠、不自动过期

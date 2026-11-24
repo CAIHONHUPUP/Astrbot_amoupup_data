@@ -28,8 +28,6 @@ EMPTY_HINT = (
 #: 这些 kind 是流水账/机器写的，进「记忆证据」时标一下，免得模型当成人说的话
 NOISY_KINDS = {
     "social_news", "bot_media", "proactive_message", "tool_memory", "self_action",
-    "finance", "finance_long", "finance_long_income", "finance_short_pnl",
-    "finance_short_fund_outage", "finance_decision", "finance_permanent",
 }
 
 

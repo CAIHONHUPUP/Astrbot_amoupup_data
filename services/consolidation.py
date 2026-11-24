@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Sequence
 #: 参与巩固的 kind（和 lifecycle 的流水集合一致；摘要/事实不动）
 NOISE_KINDS = {
     "activity", "event", "bot_media", "proactive_message", "self_action",
-    "tool_memory", "social_news", "work", "finance",
+    "tool_memory", "social_news", "work",
 }
 
 CAP_CHARS = 500

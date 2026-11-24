@@ -416,6 +416,8 @@ class MemoryAPI:
                               uid: str = "", limit: int = 200) -> dict:
         """按时间说法取聊天记录：年 → 月日 → 小时 → 具体消息（四级漏斗）。
 
+        返回 **dict**（messages/span/path/label），能陪的【按时间回看】吃的就是这个；
+        面板 ``api_messages`` 用的是 ``services/message_engine.recall_messages``（返回 list）。
         查询里没提时间就退回最近消息；返回的正文**不带时间戳**，
         时间只放在 span 里（调用方要显示日期时自己用）。
         """

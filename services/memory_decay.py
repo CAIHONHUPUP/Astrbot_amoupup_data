@@ -4,7 +4,7 @@
 原来所有记忆共用 45 天半衰期、90 天归档：一句「今天吃了面」和「主人对芒果过敏」
 衰减速度一样，流水账会一直和长期事实抢召回。这里按 kind 分开：
 
-    * 流水账 / 机器写的（activity、event、finance*、bot_media…）活得最短；
+    * 流水账 / 机器写的（activity、event、bot_media…）活得最短；
     * 摘要类活得中等（周摘要、日总结要能翻旧账）；
     * 事实 / 偏好 / 人设 / 里程碑接近永久。
 
@@ -18,12 +18,12 @@ from typing import Any, Dict, Iterable, Set
 NOISE_TTL_DAYS = 30
 #: 流水账归档的重要度上限（重要的活动记录不提前归档）
 NOISE_MAX_IMPORTANCE = 0.4
-#: 流水账 kind 集合（和 core/memory_tooling.NOISY_KINDS 保持一致）
+#: 流水账 kind 集合：这里是「该快速衰减/优先归档」的口径，比
+#: core/memory_tooling.NOISY_KINDS（只标「机器写的、别当人话」那 5 种）更宽——
+#: activity/event/work 这些要衰减，但不是机器旁白。两边**故意不同**，别硬拉平。
 NOISE_KINDS: Set[str] = {
     "activity", "event", "chat", "message", "bot_media", "proactive_message",
-    "self_action", "tool_memory", "social_news", "work", "finance", "finance_long",
-    "finance_long_income", "finance_long_expense", "finance_short_pnl",
-    "finance_short_fund_outage", "finance_decision", "finance_permanent",
+    "self_action", "tool_memory", "social_news", "work",
     "imported_memory",
 }
 
@@ -38,7 +38,6 @@ KIND_HALF_LIFE_DAYS: Dict[str, float] = {
     "tool_memory": 14.0,
     "social_news": 7.0,
     "work": 21.0,
-    "finance": 7.0,
     "daily_digest": 120.0,
     "conversation_summary": 90.0,
     "milestone": 365.0,

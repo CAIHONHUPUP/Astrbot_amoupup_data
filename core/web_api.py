@@ -36,7 +36,7 @@ class WebAPIMixin(WebHandlersMixin):
 
     WRITE_PATHS = frozenset({
         "/profile/save", "/profile/delete",
-        "/person/link", "/person/unlink", "/person/merge",
+        "/person/link", "/person/unlink", "/person/merge", "/person/delete",
         "/memory/save", "/memory/delete", "/memory/maintain", "/memory/backfill_platform",
         "/lifecycle/run",
         "/relation/save", "/relation/delete",
@@ -142,6 +142,7 @@ class WebAPIMixin(WebHandlersMixin):
             ("/person/link", self.api_person_link),
             ("/person/unlink", self.api_person_unlink),
             ("/person/merge", self.api_person_merge),
+            ("/person/delete", self.api_person_delete),
             ("/memories", self.api_memories),
             ("/memory/save", self.api_memory_save),
             ("/memory/delete", self.api_memory_delete),

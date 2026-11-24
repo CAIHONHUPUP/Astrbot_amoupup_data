@@ -154,6 +154,17 @@
       </div>
       <div class="hint">按平台分组：点平台展开名单，再点一条进入编辑（改名字、称呼、关系，保存后立即写回库）。</div>
     </div>
+    <section class="card">
+      <div class="row between">
+        <div><div class="label">记忆生命周期</div><div class="sub">休眠 / 过期 / 清理按当前 TTL 走；先预览再整理。</div></div>
+      </div>
+      <div class="hint" id="lifecycleStat">生命周期：读取中…</div>
+      <div class="row">
+        <button class="ghost" id="btnLifecyclePreview">预览影响</button>
+        <button class="ghost danger" id="btnLifecycleRun">立即整理</button>
+      </div>
+    </section>
+
     <div class="list" id="profileList"></div>
 
     <div class="card" id="editor" hidden>
@@ -173,9 +184,8 @@
       <textarea id="fRemark" placeholder="特征、偏好、要注意的事"></textarea>
       <div class="row" style="margin-top:10px">
         <button class="primary" id="btnSaveProfile">保存</button>
-        <button class="ghost danger" id="btnDeleteProfile">删除这个人的全部数据</button>
       </div>
-      <div class="hint">删除会连带清掉他的记忆、关系边和缓存，不可恢复。</div>
+      <div class="hint">改完点保存。要整个删掉这个人，去「人物」页点进去删。</div>
     </div>
 
     <div class="card" id="memories" hidden>
@@ -185,11 +195,6 @@
         <button class="ghost" id="btnRefreshMem">刷新</button>
       </div>
       <div id="memList"></div>
-      <div class="hint" id="lifecycleStat">生命周期：读取中…</div>
-      <div class="row">
-        <button class="ghost" id="btnLifecyclePreview">预览影响</button>
-        <button class="ghost danger" id="btnLifecycleRun">立即整理</button>
-      </div>
       <label>新增一条记忆</label>
       <div class="row">
         <input class="grow" id="newMem" placeholder="例如：他养了一只叫团子的猫">
@@ -211,7 +216,11 @@
     <div class="card" id="personDetail" hidden>
       <div class="row">
         <strong class="grow" id="personTitle">人物</strong>
+        <button class="ghost danger" id="btnPersonDelete">删除</button>
         <button class="ghost" id="btnPersonClose">关闭</button>
+      </div>
+      <div class="row" id="personDeleteAsk" hidden style="margin-top:8px">
+        <span class="grow hint" id="personDeleteAskText"></span>
       </div>
       <div id="personLinks" class="hint"></div>
       <div class="row" style="margin-top:8px">
@@ -453,11 +462,32 @@ function bridge() {
 
 const WRITE_ACTIONS = new Set([
   "profile/save", "profile/delete", "memory/save", "memory/delete", "lifecycle/run",
-  "person/link", "person/unlink", "person/merge",
+  "person/link", "person/unlink", "person/merge", "person/delete",
   "relation/save", "relation/delete", "message/delete", "message/clear",
   "log/delete", "log/clear", "schedule/delete", "maintenance",
   "memory/backfill_platform", "group/rename",
 ]);
+
+// 插件页在沙箱 iframe 里，window.confirm 会被静默忽略（点了像没反应）。
+// 统一改成两段式：第一次点变成「再点确认」，3 秒内再点才真执行。
+function confirmTwice(button, label, message) {
+  if (!button) return false;
+  if (button.dataset.armed === "1") {
+    button.dataset.armed = "0";
+    button.textContent = label;
+    return true;
+  }
+  button.dataset.armed = "1";
+  button.textContent = "再点确认";
+  toast(String(message || label) + "（3 秒内再点一次确认）");
+  setTimeout(() => {
+    if (button.dataset.armed === "1") {
+      button.dataset.armed = "0";
+      button.textContent = label;
+    }
+  }, 3000);
+  return false;
+}
 
 async function bridgeCall(action, payload) {
   const b = bridge();
@@ -1006,20 +1036,6 @@ document.getElementById("btnSaveProfile").addEventListener("click", async () => 
   } catch (error) { toast("保存失败：" + error.message, true); }
 });
 
-document.getElementById("btnDeleteProfile").addEventListener("click", async () => {
-  if (!currentUid) return;
-  if (!window.confirm("删除 " + currentUid + " 的画像、记忆、关系边？不可恢复。")) return;
-  try {
-    await call("profile/delete", { uid: currentUid, bot_id: currentBot, confirm: 1 });
-    toast("已删除");
-    document.getElementById("editor").hidden = true;
-    document.getElementById("memories").hidden = true;
-    currentUid = "";
-    loadProfiles();
-    loadStatus();
-  } catch (error) { toast("删除失败：" + error.message, true); }
-});
-
 document.getElementById("btnCloseEditor").addEventListener("click", () => {
   document.getElementById("editor").hidden = true;
   document.getElementById("memories").hidden = true;
@@ -1038,8 +1054,9 @@ document.getElementById("btnAddMem").addEventListener("click", async () => {
 });
 
 document.getElementById("btnRefreshMem").addEventListener("click", () => currentUid && openProfile(currentUid));
-document.getElementById("btnBackfillPlat").addEventListener("click", async () => {
-  if (!window.confirm("给所有『来源未知』的老记忆补来源平台？\n只补能确定的：整句在聊天记录里出现过，或写这条记忆前后 10 分钟只有一个平台在说话；说不准的保持未知。")) return;
+document.getElementById("btnBackfillPlat").addEventListener("click", async (event) => {
+  if (!confirmTwice(event.currentTarget, "回填来源",
+    "给所有『来源未知』的老记忆补来源平台；只补能确定的，说不准的保持未知。")) return;
   try {
     const res = objectFrom(await call("memory/backfill_platform", {})) || {};
     const unsure = Number(res.ambiguous || 0) + Number(res.unknown || 0);
@@ -1070,7 +1087,22 @@ document.getElementById("btnLifecyclePreview").addEventListener("click", async (
   } catch (error) { toast("预览失败：" + error.message, true); }
 });
 document.getElementById("btnLifecycleRun").addEventListener("click", async () => {
-  if (!window.confirm("现在按当前 TTL 整理一次（休眠/过期/清理）？")) return;
+  // 沙箱 iframe 里 window.confirm 会被静默吃掉：改成两段式
+  const runBtn = document.getElementById("btnLifecycleRun");
+  if (runBtn.dataset.armed !== "1") {
+    runBtn.dataset.armed = "1";
+    runBtn.textContent = "再点确认";
+    toast("会按当前 TTL 休眠/过期/清理，3 秒内再点一次确认。");
+    setTimeout(() => {
+      if (runBtn.dataset.armed === "1") {
+        runBtn.dataset.armed = "0";
+        runBtn.textContent = "立即整理";
+      }
+    }, 3000);
+    return;
+  }
+  runBtn.dataset.armed = "0";
+  runBtn.textContent = "立即整理";
   try {
     const data = objectFrom(await call("lifecycle/run", {})) || {};
     toast("已整理：休眠 " + (data.dormant || 0) + " 条，过期 " + (data.expired || 0) +
@@ -1153,6 +1185,16 @@ async function openPerson(pid) {
     const data = objectFrom(await call("person", { pid })) || {};
     const card = document.getElementById("personDetail");
     card.hidden = false;
+    const askBox = document.getElementById("personDeleteAsk");
+    if (askBox) askBox.hidden = true;
+    const askLabel = document.getElementById("personDeleteAskText");
+    if (askLabel) askLabel.textContent = "";
+    const delBtn = document.getElementById("btnPersonDelete");
+    if (delBtn) {
+      delBtn.hidden = false;
+      delBtn.dataset.armed = "0";
+      delBtn.textContent = "删除";
+    }
     document.getElementById("personTitle").textContent =
       (data.name || "未命名") + " · pid " + data.pid + " · 消息 " + (data.msg_count || 0);
     const linkBox = document.getElementById("personLinks");
@@ -1168,7 +1210,21 @@ async function openPerson(pid) {
       unbind.className = "ghost danger";
       unbind.textContent = "解绑";
       unbind.addEventListener("click", async () => {
-        if (!confirm("解绑后它单独算一个人，聊天记录不会删。继续？")) return;
+        // 插件页在沙箱 iframe 里，window.confirm 会被静默吃掉：改成两段式
+        if (unbind.dataset.armed !== "1") {
+          unbind.dataset.armed = "1";
+          unbind.textContent = "再点确认";
+          toast("解绑后它单独算一个人，聊天记录不会删。3 秒内再点一次。");
+          setTimeout(() => {
+            if (unbind.dataset.armed === "1") {
+              unbind.dataset.armed = "0";
+              unbind.textContent = "解绑";
+            }
+          }, 3000);
+          return;
+        }
+        unbind.dataset.armed = "0";
+        unbind.textContent = "解绑";
         try {
           await call("person/unlink", { platform: link.platform, uid: link.uid });
           toast("已解绑");
@@ -1197,6 +1253,55 @@ document.getElementById("personSearch").addEventListener("input", () => {
 document.getElementById("btnPersonClose").addEventListener("click", () => {
   document.getElementById("personDetail").hidden = true;
 });
+document.getElementById("btnPersonDelete").addEventListener("click", async () => {
+  if (!currentPid) { toast("先在上面点一个人", true); return; }
+  const delBtn = document.getElementById("btnPersonDelete");
+  const askBox = document.getElementById("personDeleteAsk");
+  const askText = document.getElementById("personDeleteAskText");
+
+  // 第二次点（按钮已经是「确认删除」）才真删
+  if (delBtn.dataset.armed === "1") {
+    delBtn.dataset.armed = "0";
+    delBtn.textContent = "删除";
+    try {
+      const out = await call("person/delete", { pid: currentPid, confirm: 1 });
+      if (out && Number(out.code) === 1) throw new Error(out.msg || "删除失败");
+      toast("已删除");
+      if (askBox) askBox.hidden = true;
+      document.getElementById("personDetail").hidden = true;
+      loadPersons();
+    } catch (error) {
+      console.error("[person/delete]", error);
+      toast("删除失败：" + ((error && error.message) || error), true);
+    }
+    return;
+  }
+
+  // 第一次点：只预览，按钮就地变成「确认删除」
+  let preview = "";
+  try {
+    const probe = await call("person/delete", { pid: currentPid });
+    preview = String((probe && (probe.msg || probe.message)) || "");
+  } catch (error) {
+    preview = String((error && error.message) || "");
+  }
+  if (preview.indexOf("确认") < 0) preview = "";
+  preview = preview.replace(/带 confirm=1[^。]*。?$/, "").trim();
+  if (askText) {
+    askText.textContent = (preview || "删除这个人") +
+      " 删掉后聊天、记忆、摘要、画像、关系都会一起清掉，不能恢复。";
+  }
+  if (askBox) askBox.hidden = false;
+  delBtn.dataset.armed = "1";
+  delBtn.textContent = "确认删除";
+  setTimeout(() => {
+    if (delBtn.dataset.armed === "1") {
+      delBtn.dataset.armed = "0";
+      delBtn.textContent = "删除";
+      if (askBox) askBox.hidden = true;
+    }
+  }, 8000);
+});
 document.getElementById("btnPersonLink").addEventListener("click", async () => {
   const platform = document.getElementById("linkPlatform").value;
   const uid = (document.getElementById("linkUid").value || "").trim();
@@ -1213,11 +1318,12 @@ document.getElementById("btnPersonLink").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btnPersonMerge").addEventListener("click", async () => {
+document.getElementById("btnPersonMerge").addEventListener("click", async (event) => {
   const dropPid = parseInt(document.getElementById("mergePid").value || "0", 10);
   if (!currentPid || !dropPid) { toast("先在上面点一个人，再填要并进来的 pid", true); return; }
   if (dropPid === currentPid) { toast("不能并到自己", true); return; }
-  if (!confirm("合并后对方那条会被删掉，身份和记录都并到当前这条。继续？")) return;
+  if (!confirmTwice(event.currentTarget, "并进来",
+    "合并后对方那条会被删掉，身份和记录都并到当前这条。")) return;
   try {
     const result = await call("person/merge", { keep_pid: currentPid, drop_pid: dropPid });
     toast(result.msg || "已合并");
@@ -1789,7 +1895,7 @@ async function deleteRelEdge() {
   const right = edge.b_name || edge.b_uid || "";
   // 删关系会两边一起删（能记 + 陪伴），点错一次就找不回来，先问一句
   const ask = "确定删除「" + left + " ↔ " + right + "（" + (edge.relation || "朋友") + "）」这条关系吗？\n能记和陪伴两边都会删掉。";
-  if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(ask)) {
+  if (!confirmTwice(document.getElementById("relNodeDelete"), "删除选中的关系", ask)) {
     return;
   }
   try {
@@ -1897,13 +2003,13 @@ async function loadChat() {
 }
 
 document.getElementById("btnChatReload").addEventListener("click", () => { chatPid = 0; loadChat(); });
-document.getElementById("btnChatClear").addEventListener("click", async () => {
+document.getElementById("btnChatClear").addEventListener("click", async (event) => {
   if (chatPid) {
     toast("选人视图下不整块清空：先在上面按会话筛选，再点清空", true);
     return;
   }
   const umo = (document.getElementById("chatUmo").value || "").trim();
-  if (!window.confirm("清空" + (umo ? "这个会话" : "全部") + "聊天记录？不可恢复。")) return;
+  if (!confirmTwice(event.currentTarget, "清空", "清空" + (umo ? "这个会话" : "全部") + "聊天记录？不可恢复。")) return;
   try {
     await call("message/clear", { umo, confirm: 1 });
     toast("已清空");
@@ -2065,7 +2171,7 @@ async function loadSchedule() {
       del.textContent = "删";
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!window.confirm("删除缓存 " + item.key + "？")) return;
+        if (!confirmTwice(e.currentTarget, "删", "删除缓存 " + item.key + "？")) return;
         try {
           await call("schedule/delete", { key: item.key });
           toast("已删除");
@@ -2122,8 +2228,8 @@ async function loadBackups() {
       const btn = document.createElement("button");
       btn.className = "ghost";
       btn.textContent = "恢复";
-      btn.addEventListener("click", async () => {
-        if (!window.confirm("从这份备份合并恢复？现有记忆不会被删除。")) return;
+      btn.addEventListener("click", async (e) => {
+        if (!confirmTwice(e.currentTarget, "恢复", "从这份备份合并恢复？现有记忆不会被删除。")) return;
         try {
           const res = await call("backup/restore", { name: item.name });
           const counts = (res && res.data) || {};
@@ -2221,8 +2327,8 @@ async function loadLogs() {
 
 document.getElementById("btnLogReload").addEventListener("click", loadLogs);
 document.getElementById("logLevel").addEventListener("change", loadLogs);
-document.getElementById("btnLogClear").addEventListener("click", async () => {
-  if (!window.confirm("清空全部日志？不可恢复。")) return;
+document.getElementById("btnLogClear").addEventListener("click", async (event) => {
+  if (!confirmTwice(event.currentTarget, "清空日志", "清空全部日志？不可恢复。")) return;
   try {
     await call("log/clear", { confirm: 1 });
     toast("已清空");

@@ -68,6 +68,29 @@ def _is_meta_query(text: Any) -> bool:
     return any(word in body for word in _META_PATTERNS)
 
 
+#: 只有这些「过去时间」说法才按时间收窄候选：问「昨晚」就只召回昨晚前后，
+#: 别让两周前问过同样问题的旧摘要顶到前面（线上真实症状：问「我昨晚最后一句
+#: 是什么」，召回的全是 11-05 那次「你说永远陪着你」）。
+_PAST_HINTS = ("昨天", "昨晚", "前天", "大前天", "上周", "上上", "上个月", "上月",
+               "去年", "前年", "那天", "那次", "当时", "前几天", "前些天")
+
+
+def _recall_time_window(text: Any, span: Any) -> Optional[tuple]:
+    """查询带「过去时间」时，返回允许的 created_at 区间；否则 None（不收窄）。"""
+    body = str(text or "")
+    if not span or not any(word in body for word in _PAST_HINTS):
+        return None
+    try:
+        start = int(span.get("start") or 0)
+        end = int(span.get("end") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not start or not end:
+        return None
+    # 往前放一天（前一天的闲聊/约定），往后放两天（次日早上写的日摘也要能进来）
+    return start - 86400, end + 2 * 86400
+
+
 class RetrievalEngine:
     def __init__(self, db, settings, persons=None, memory=None):
         self.db = db
@@ -312,6 +335,25 @@ class RetrievalEngine:
         rows = self._merge_entity_candidates(ctx, rows)
         if trace is not None:
             trace.step("entity", "n=%d" % len(rows))
+        window = _recall_time_window(text, span)
+        if window:
+            lo, hi = window
+            kept = []
+            for row in rows:
+                try:
+                    ts = int(row["created_at"] or 0)
+                except (KeyError, IndexError, TypeError, ValueError):
+                    kept.append(row)
+                    continue
+                if not ts or lo <= ts < hi:
+                    kept.append(row)
+            if kept:
+                if trace is not None:
+                    trace.step("time_window", "n=%d (was %d)" % (len(kept), len(rows)))
+                rows = kept
+            elif trace is not None:
+                # 窗口里一条都没有：宁可退回原候选，也不要让「问昨晚」变成空白
+                trace.step("time_window", "empty, fallback")
         return rows
 
     def _token_candidates(self, base, params, text, pool_size):

@@ -19,7 +19,7 @@ STATIC_KINDS = {
 NON_STATIC_KINDS = {
     "expense", "income", "trade", "transaction", "message", "conversation_summary",
     "daily_digest", "diary", "event", "milestone", "bot_media", "voice_note",
-    "shopping", "bill", "summary", "log", "finance",
+    "shopping", "bill", "summary", "log",
 }
 
 _SUBJECTS = ("老公", "主人", "用户", "宝贝", "我", "他", "她")

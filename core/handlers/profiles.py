@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from astrbot.api import logger
-
 try:  # 包模式
     from ..web_response import (confirm_required, confirmed, fail, int_field, missing, ok,
                                 result, text_field)
@@ -131,6 +129,39 @@ class ProfileHandlersMixin:
             return missing("uid")
         unlinked = self.persons.unlink_identity(bot_id, platform, uid)
         return result(unlinked, {"ok": unlinked}, "已解绑", "没找到这个身份")
+
+    async def api_person_delete(self):
+        payload = await self._body()
+        bot_id = self._bot_id(payload, write=True)
+        pid = int_field(payload, "pid")
+        if not pid:
+            return missing("pid")
+        try:
+            log_event("info", "person.delete.probe", pid=pid, bot_id=bot_id or "-",
+                      confirm=confirmed(payload))
+        except Exception:
+            pass
+        preview = self.persons.delete_person(bot_id, pid, dry_run=True)
+        if not preview.get("ok"):
+            return fail("没找到这个人")
+        counts = preview.get("counts") or {}
+        if not confirmed(payload):
+            return fail(
+                "删除需要确认：会删掉 %d 条聊天、%d 条记忆、%d 个画像。带 confirm=1 再发一次才执行。"
+                % (int(counts.get("messages") or 0), int(counts.get("memories") or 0),
+                   int(counts.get("profiles") or 0)))
+        log_event("info", "person.delete", pid=pid, bot_id=bot_id or "-",
+                  messages=int(counts.get("messages") or 0),
+                  memories=int(counts.get("memories") or 0))
+        out = self.persons.delete_person(bot_id, pid)
+        if not out.get("ok"):
+            return fail("删除失败")
+        for uid in counts.get("uids") or []:
+            try:
+                self._forget_in_amo(uid)
+            except Exception:
+                pass
+        return ok(out.get("counts") or {}, "已删除")
 
     async def api_person_merge(self):
         payload = await self._body()

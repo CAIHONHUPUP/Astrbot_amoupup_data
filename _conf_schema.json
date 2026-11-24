@@ -11,18 +11,6 @@
     "hint": "留空用 default。同一个 QQ 号在不同 bot 下是独立画像和独立记忆；Amo 传 bot_id 时以它为准。",
     "default": "default"
   },
-  "auto_create_profile": {
-    "type": "bool",
-    "description": "聊天时自动建画像",
-    "hint": "打开后只要有人说话就会建一条空画像，方便在面板里补名字和关系。",
-    "default": true
-  },
-  "max_recall": {
-    "type": "int",
-    "description": "默认召回条数",
-    "hint": "Amo 不传 limit 时用这个值。",
-    "default": 6
-  },
   "chat_days": {
     "type": "int",
     "description": "聊天记录保留天数",
@@ -45,11 +33,6 @@
     "description": "给主模型注册记忆工具",
     "hint": "打开后她可以在拿不准时主动查记忆（recall_long_term_memory）、把重要的事记下来（memorize_long_term_memory）、删掉记错的（forget_long_term_memory）。关掉就只有被动注入，不会额外调用工具。",
     "default": true
-  },
-  "min_importance": {
-    "type": "float",
-    "description": "记忆默认重要度",
-    "default": 0.5
   },
   "recall_pool_size": {
     "type": "int",

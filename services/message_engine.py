@@ -289,8 +289,28 @@ class MessageEngine:
 
         识别不了返回 (0, 0)；调用方据此返回空列表，避免「标签写上周三、
         内容却是今天的」这种更糟的错配。
+
+        口径统一（2026-11-24）：优先用 ``utils/time_query.parse_time_span`` ——
+        能陪的时间回看走的就是它，两边各写一套会出现「同一个『昨晚』，面板 18:00、
+        聊天 19:00」这种漂移。解析不出来再退回下面的老逻辑。
         """
         text = str(query or "")
+        try:
+            try:
+                from ..utils.time_query import parse_time_span as _parse
+            except ImportError:
+                from utils.time_query import parse_time_span as _parse
+            _span = _parse(text)
+        except Exception as exc:
+            logger.debug("[amo_data] 时间窗走统一解析失败，退回老逻辑: %r", exc)
+            _span = None
+        if _span:
+            try:
+                start, end = int(_span["start"]), int(_span["end"])
+            except (KeyError, TypeError, ValueError):
+                start = end = 0
+            if start and end:
+                return start, end
         now = _clock.now()
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         for handler in (cls._tw_relative_day, cls._tw_weekday, cls._tw_month_day,
@@ -438,7 +458,12 @@ class MessageEngine:
                         uid: str = "", limit: int = 200) -> List[Dict[str, Any]]:
         """按时间回看的一段聊天（时间回看 / 每日总结都调它）。
 
-        之前 amo 调 ``recall_messages``，这边只有 ``list_messages``，两边契约对不上，
+        注意别和 ``core/api.py`` 的同名方法搞混：
+        - 本方法（services 层）返回 **list**，给面板 ``api_messages`` 用；
+        - ``core/api.recall_messages`` 返回 **dict**（messages/span/path/label），给能陪用。
+        两者底层时间窗现在都走 ``utils/time_query.parse_time_span``。
+
+        历史坑：以前 amo 调 ``recall_messages``，这边只有 ``list_messages``，两边契约对不上，
         功能静默失效（amo 侧 callable=False 直接 return）。返回按时间正序。
         """
         limit = max(1, min(int(limit or 200), 1000))

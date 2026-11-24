@@ -283,6 +283,78 @@ class PersonEngine:
         return True
 
 
+    def delete_person(self, bot_id: str, pid: int, dry_run: bool = False) -> Dict[str, Any]:
+        """彻底删掉一个人物：身份、聊天、记忆（含向量/词条/摘要）、画像、关系。
+
+        dry_run=True 只统计，用于面板确认；任何一步失败整笔回滚，绝不半删。
+        """
+        bot_id = str(bot_id or "")
+        pid = int(pid or 0)
+        if not bot_id or not pid:
+            return {"ok": False, "reason": "bad_args"}
+        with self.lock:
+            person = self.conn.execute(
+                "SELECT pid, name FROM persons WHERE bot_id=? AND pid=?", (bot_id, pid)
+            ).fetchone()
+            if not person:
+                return {"ok": False, "reason": "not_found"}
+            links = [dict(row) for row in self.conn.execute(
+                "SELECT platform, uid FROM person_links WHERE bot_id=? AND pid=?", (bot_id, pid)
+            ).fetchall()]
+            uids = [str(item.get("uid") or "") for item in links if str(item.get("uid") or "")]
+            uid_marks = ",".join("?" for _ in uids) or "NULL"
+            row_where = "(pid=? OR uid IN (%s))" % uid_marks if uids else "pid=?"
+            row_args = [bot_id, pid] + uids
+
+            def _count(sql, args):
+                row = self.conn.execute(sql, args).fetchone()
+                return int((row[0] if row else 0) or 0)
+
+            counts = {
+                "pid": pid,
+                "name": str(person["name"] or ""),
+                "messages": _count("SELECT COUNT(*) FROM messages WHERE bot_id=? AND " + row_where, row_args),
+                "memories": _count("SELECT COUNT(*) FROM memories WHERE bot_id=? AND " + row_where, row_args),
+                "profiles": (_count("SELECT COUNT(*) FROM profiles WHERE bot_id=? AND uid IN (%s)" % uid_marks,
+                                    [bot_id] + uids) if uids else 0),
+                "links": len(links),
+            }
+            if dry_run:
+                counts["uids"] = list(uids)
+                return {"ok": True, "dry_run": True, "counts": counts}
+            names = {str(row[0]) for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            try:
+                mem_ids = ("SELECT id FROM memories WHERE bot_id=? AND " + row_where)
+                if "memory_vec" in names:
+                    self.conn.execute("DELETE FROM memory_vec WHERE memory_id IN (" + mem_ids + ")", row_args)
+                if "memory_entities" in names:
+                    self.conn.execute("DELETE FROM memory_entities WHERE memory_id IN (" + mem_ids + ")", row_args)
+                self.conn.execute("DELETE FROM memories WHERE bot_id=? AND " + row_where, row_args)
+                self.conn.execute("DELETE FROM messages WHERE bot_id=? AND " + row_where, row_args)
+                if uids:
+                    if "relations" in names:
+                        self.conn.execute(
+                            "DELETE FROM relations WHERE bot_id=? AND (a_uid IN (%s) OR b_uid IN (%s))"
+                            % (uid_marks, uid_marks), [bot_id] + uids + uids)
+                    if "identity_alias" in names:
+                        self.conn.execute(
+                            "DELETE FROM identity_alias WHERE bot_id=? AND (uid IN (%s) OR alias_uid IN (%s))"
+                            % (uid_marks, uid_marks), [bot_id] + uids + uids)
+                    if "profiles" in names:
+                        self.conn.execute("DELETE FROM profiles WHERE bot_id=? AND uid IN (%s)" % uid_marks,
+                                          [bot_id] + uids)
+                self.conn.execute("DELETE FROM person_links WHERE bot_id=? AND pid=?", (bot_id, pid))
+                self.conn.execute("DELETE FROM persons WHERE bot_id=? AND pid=?", (bot_id, pid))
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+        self.clear_canonical_cache()
+        counts["ok"] = True
+        return {"ok": True, "counts": counts}
+
+
     def merge_persons(self, bot_id: str, keep_pid: int, drop_pid: int) -> bool:
         """把 drop 合并进 keep：身份、聊天记录、记忆都并过去，然后删掉 drop。
 
@@ -694,63 +766,6 @@ class PersonEngine:
         return adopted
 
 
-    def adopt_group_finance_memories(self) -> int:
-        """把旧版「群号当 uid」的金融记忆收回成 owner（不猜是哪个人）。
-
-        旧版 finance_memory_uid() 直接取会话 umo 的尾巴；群聊尾巴是群号，
-        金融记忆就被记成 uid=<群号>、pid=0。这里只认 kind='finance'，改挂到
-        固定内部身份 owner（pid 仍为 0）：既不串给某个用户，finance_recall
-        也能按 owner 兜底找回来。已经手工绑定过的人物 link 优先，不抢。
-        """
-        with self.lock:
-            rows = self.conn.execute(
-                "SELECT id, bot_id, uid, scope, group_id, idem_key FROM memories "
-                "WHERE COALESCE(pid,0)=0 AND kind='finance' "
-                "AND uid NOT IN ('owner', 'amo', 'bot', '')"
-            ).fetchall()
-            if not rows:
-                return 0
-            group_keys = set()
-            for item in self.conn.execute(
-                "SELECT DISTINCT bot_id, umo FROM messages WHERE umo LIKE '%:GroupMessage:%'"
-            ).fetchall():
-                umo = str(item["umo"] or "")
-                if umo and ":" in umo:
-                    group_keys.add((str(item["bot_id"]), umo.rsplit(":", 1)[-1]))
-            linked = {(str(item["bot_id"]), str(item["uid"]))
-                      for item in self.conn.execute(
-                          "SELECT bot_id, uid FROM person_links WHERE pid>0").fetchall()}
-            moved = 0
-            merged = 0
-            for mem in rows:
-                key = (str(mem["bot_id"]), str(mem["uid"]))
-                if key not in group_keys or key in linked:
-                    continue
-                try:
-                    self.conn.execute(
-                        "UPDATE memories SET uid='owner', pid=0 WHERE id=?",
-                        (int(mem["id"]),),
-                    )
-                    moved += 1
-                except sqlite3.IntegrityError:
-                    old = self.conn.execute(
-                        "SELECT id FROM memories WHERE bot_id=? AND uid='owner' AND scope=? "
-                        "AND group_id=? AND idem_key=? LIMIT 1",
-                        (key[0], str(mem["scope"]), str(mem["group_id"]),
-                         str(mem["idem_key"])),
-                    ).fetchone()
-                    self.conn.execute(
-                        "UPDATE memories SET status='merged', superseded_by=? WHERE id=?",
-                        (int(old["id"]) if old else 0, int(mem["id"])),
-                    )
-                    merged += 1
-            if moved or merged:
-                self.conn.commit()
-                logger.info("[amo_data] 群号金融记忆收回 owner：%d 条（合并 %d 条）"
-                            % (moved, merged))
-        return moved
-
-
     def pid_for_uid(self, bot_id: str, uid: str) -> int:
         """只有 uid 时反查 pid（不分平台）；查不到返回 0。"""
         uid = str(uid or "")
@@ -945,7 +960,6 @@ class PersonEngine:
     def bootstrap(self) -> None:
         """启动自愈（原 store.__init__ 里做的那几件事）。失败只告警，不挡启动。"""
         for fn in (self.normalize_identities, self.repair_persons,
-                   self.adopt_group_finance_memories,
                    self.adopt_orphan_memories, self.merge_ghost_persons):
             try:
                 fn()
