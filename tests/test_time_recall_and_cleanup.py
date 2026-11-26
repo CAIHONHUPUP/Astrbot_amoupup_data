@@ -39,7 +39,8 @@ def test_engine_window_matches_parser():
     from services.message_engine import MessageEngine
 
     span = tq.parse_time_span("昨晚我们聊了什么", now=NOW.replace(tzinfo=None))
-    start, end = MessageEngine._time_window("昨晚我们聊了什么")
+    # 2026-11-26：_time_window 现在收 now，测试不再依赖跑测那天是哪天
+    start, end = MessageEngine._time_window("昨晚我们聊了什么", now=NOW.replace(tzinfo=None))
     assert (start, end) == (int(span["start"]), int(span["end"]))
 
 

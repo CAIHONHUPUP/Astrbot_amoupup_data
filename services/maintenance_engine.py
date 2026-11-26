@@ -115,6 +115,12 @@ class MaintenanceEngine:
                 result["semantic"] = await self._maybe_semantic(bot_id)
         except Exception as exc:
             result["semantic_error"] = str(exc)
+        # 2026-11-26：LLM 提炼聊天摘要（把原文拼接式 summary 改成语义摘要）
+        try:
+            if self.settings.get("summary_llm_refine_enabled", True):
+                result["summary_refine"] = await self._refine_summaries(bot_id)
+        except Exception as exc:
+            result["summary_refine_error"] = str(exc)
         return result
 
     async def _maybe_semantic(self, bot_id: str) -> Dict[str, Any]:
@@ -156,6 +162,9 @@ class MaintenanceEngine:
             if self.settings.get("recall_entity_graph", True):
                 out["graph_backfill"] = entity_graph.backfill(
                     self.plugin.memory.dao, bot_id, 2000)
+                # 2026-11-26：清理孤立实体和悬空边（backfill 补完后再清）
+                out["graph_pruned"] = entity_graph.prune_orphans(
+                    self.plugin.memory.dao, bot_id)
         except Exception as exc:
             out["graph_error"] = str(exc)
         try:
@@ -164,6 +173,108 @@ class MaintenanceEngine:
             logger.debug("[amo_data] optional step failed: %r", exc)
         logger.info("[amo_data] 生命周期: %s" % out)
         return out
+
+    async def _refine_summaries(self, bot_id: str) -> Dict[str, Any]:
+        """每天一次：把原文拼接式聊天摘要用 LLM 提炼成语义摘要（2026-11-26）。
+
+        只处理 role='summary' 且 content 以 [YYYY-MM-DD 开头（原文拼接格式）的条目。
+        每次最多处理 summary_llm_refine_batch（默认 20）条，失败的跳过留到下一次。
+        配置项：
+          summary_llm_refine_enabled  : bool，默认 true
+          summary_llm_refine_batch    : int，每次最多提炼几条，默认 20
+          summary_llm_refine_max_chars: int，提炼后摘要最大字数，默认 300
+        """
+        import re
+        import time
+
+        # 只在上次跑完超过 20 小时才跑
+        key = "summary_refine_last"
+        now = int(time.time())
+        try:
+            last = int(self.plugin.cache.cache_get(bot_id, key) or 0)
+            if now - last < 20 * 3600:
+                return {"skipped": True}
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
+
+        # 拿 provider
+        provider = None
+        try:
+            provider = self.plugin.context.get_using_provider()
+        except Exception as exc:
+            logger.debug("[amo_data] 取 provider 失败，跳过摘要提炼: %s" % exc)
+        if provider is None:
+            return {"skipped": True, "reason": "no_provider"}
+
+        batch = max(1, int(self.settings.get("summary_llm_refine_batch", 20) or 20))
+        max_chars = max(100, int(self.settings.get("summary_llm_refine_max_chars", 300) or 300))
+        # 识别原文拼接格式：[YYYY-MM-DD 共N条 · xxx]
+        _raw_re = re.compile(r"^\[(\d{4}-\d{2}-\d{2}) 共 ?\d+ 条")
+
+        # 查出未提炼的原文拼接摘要
+        with self.plugin.db.lock:
+            rows = self.plugin.db.conn.execute(
+                "SELECT id, content, umo, uid, created_at FROM messages "
+                "WHERE bot_id=? AND role='summary' AND compressed=1 "
+                "AND content LIKE '[____-__-__% 共%条%' "
+                "ORDER BY created_at DESC LIMIT ?",
+                (str(bot_id), batch),
+            ).fetchall()
+
+        refined = 0
+        failed = 0
+        _SYSTEM = (
+            "你是聊天记录摘要员。把输入的原始聊天记录提炼成一段简洁的第三人称摘要，"
+            "保留关键事件和情绪，不超过 %d 字，只输出摘要正文，不加任何前缀。" % max_chars
+        )
+
+        for row in rows:
+            content = str(row["content"] or "")
+            if not _raw_re.match(content):
+                continue  # 已经提炼过或格式不对，跳过
+            # 去掉 [日期 共N条 · 人名] 前缀，取原文部分
+            body = re.sub(r"^\[[^\]]+\]\s*", "", content)
+            if len(body) < 20:
+                continue
+            # 截断超长的原文，避免 token 超限
+            prompt = body[:2000]
+            try:
+                resp = await asyncio.wait_for(
+                    provider.text_chat(prompt=prompt, system_prompt=_SYSTEM),
+                    timeout=30,
+                )
+                refined_text = str(getattr(resp, "completion_text", "") or "").strip()
+            except Exception as exc:
+                logger.debug("[amo_data] 摘要提炼调用失败: %s" % exc)
+                failed += 1
+                continue
+            if not refined_text or len(refined_text) < 10:
+                failed += 1
+                continue
+            # 保留日期前缀，替换正文
+            date_match = _raw_re.match(content)
+            date_str = date_match.group(1) if date_match else ""
+            new_content = ("[%s] %s" % (date_str, refined_text))[:max_chars + 20] if date_str else refined_text
+            try:
+                with self.plugin.db.lock:
+                    self.plugin.db.conn.execute(
+                        "UPDATE messages SET content=? WHERE id=?",
+                        (new_content, int(row["id"])),
+                    )
+                    self.plugin.db.conn.commit()
+                refined += 1
+                logger.debug("[amo_data] 摘要提炼: %s → %s", content[:40], new_content[:40])
+            except Exception as exc:
+                logger.debug("[amo_data] 摘要提炼写入失败: %s" % exc)
+                failed += 1
+
+        try:
+            self.plugin.cache.cache_set(bot_id, key, str(now), ttl=40 * 86400)
+        except Exception as exc:
+            logger.debug("[amo_data] optional step failed: %r", exc)
+
+        logger.info("[amo_data] 聊天摘要 LLM 提炼: refined=%d failed=%d", refined, failed)
+        return {"refined": refined, "failed": failed, "total": len(rows)}
 
     # ---------- 保留策略 ----------
     def retention(self, bot_id: str, chat_days: int = 14, compress_after: int = 3,

@@ -284,7 +284,7 @@ class MessageEngine:
 
 
     @classmethod
-    def _time_window(cls, query: str) -> tuple:
+    def _time_window(cls, query: str, now=None) -> tuple:
         """把「昨天下午 / 前天 / 上周三 / 11月6号晚上 / 最近3天」换成秒级时间窗。
 
         识别不了返回 (0, 0)；调用方据此返回空列表，避免「标签写上周三、
@@ -293,6 +293,9 @@ class MessageEngine:
         口径统一（2026-11-24）：优先用 ``utils/time_query.parse_time_span`` ——
         能陪的时间回看走的就是它，两边各写一套会出现「同一个『昨晚』，面板 18:00、
         聊天 19:00」这种漂移。解析不出来再退回下面的老逻辑。
+
+        ``now`` 只给测试/回放用（2026-11-26）：不传就取真实时钟。原来这个函数
+        只能读实时时钟，测试拿固定的 NOW 去比就必然差一天，属于时效性炸弹。
         """
         text = str(query or "")
         try:
@@ -300,7 +303,7 @@ class MessageEngine:
                 from ..utils.time_query import parse_time_span as _parse
             except ImportError:
                 from utils.time_query import parse_time_span as _parse
-            _span = _parse(text)
+            _span = _parse(text, now=now)
         except Exception as exc:
             logger.debug("[amo_data] 时间窗走统一解析失败，退回老逻辑: %r", exc)
             _span = None
@@ -311,7 +314,8 @@ class MessageEngine:
                 start = end = 0
             if start and end:
                 return start, end
-        now = _clock.now()
+        if now is None:
+            now = _clock.now()
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         for handler in (cls._tw_relative_day, cls._tw_weekday, cls._tw_month_day,
                         cls._tw_day_num, cls._tw_absolute, cls._tw_recent):

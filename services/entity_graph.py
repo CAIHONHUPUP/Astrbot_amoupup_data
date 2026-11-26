@@ -214,3 +214,54 @@ def backfill(dao, bot_id: str, limit: int = 5000) -> int:
         if link_memory(dao, bot_id, int(row["id"]), str(row["content"] or "")):
             count += 1
     return count
+
+
+def prune_orphans(dao, bot_id: str) -> int:
+    """删除孤立实体节点和悬空边（夜间维护跑一次）。
+
+    孤立实体 = entities 里没有任何 memory_entities 引用的节点；
+    悬空边   = entity_edges 里 a_id 或 b_id 已不在 entities 里的边。
+    记忆被软删除（status != active）时 memory_entities 仍保留，
+    所以只清「完全没有引用」的实体，不会误删活跃记忆的关联。
+    """
+    ensure_schema(dao)
+    deleted_entities = 0
+    deleted_edges = 0
+    with dao.lock:
+        conn = dao.conn
+        # 1. 找孤立实体（没有任何 memory_entities 引用）
+        orphan_ids = [
+            row[0] for row in conn.execute(
+                "SELECT e.id FROM entities e "
+                "WHERE e.bot_id=? "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM memory_entities me WHERE me.entity_id=e.id"
+                ")",
+                (str(bot_id),),
+            ).fetchall()
+        ]
+        if orphan_ids:
+            marks = ",".join("?" for _ in orphan_ids)
+            # 先删悬空边（引用了孤立实体的边）
+            conn.execute(
+                f"DELETE FROM entity_edges WHERE bot_id=? "
+                f"AND (a_id IN ({marks}) OR b_id IN ({marks}))",
+                [str(bot_id)] + orphan_ids + orphan_ids,
+            )
+            # 再删孤立实体
+            conn.execute(
+                f"DELETE FROM entities WHERE id IN ({marks})",
+                orphan_ids,
+            )
+            deleted_entities = len(orphan_ids)
+        # 2. 清除悬空边（a_id 或 b_id 不在 entities 里）
+        result = conn.execute(
+            "DELETE FROM entity_edges "
+            "WHERE bot_id=? "
+            "AND (a_id NOT IN (SELECT id FROM entities) "
+            "  OR b_id NOT IN (SELECT id FROM entities))",
+            (str(bot_id),),
+        )
+        deleted_edges += result.rowcount
+        conn.commit()
+    return deleted_entities

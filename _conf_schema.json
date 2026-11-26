@@ -185,6 +185,23 @@
     "description": "单组超时（秒）",
     "default": 20.0
   },
+  "summary_llm_refine_enabled": {
+    "type": "bool",
+    "description": "LLM 提炼聊天摘要",
+    "hint": "每天把原文拼接式聊天摘要（[日期 共N条]格式）用 LLM 提炼成语义摘要，提升召回质量；使用 DeepSeek-Flash，每月约 ¥0.3。",
+    "default": true
+  },
+  "summary_llm_refine_batch": {
+    "type": "int",
+    "description": "每次提炼几条",
+    "hint": "每次维护最多提炼这么多条原文拼接摘要，分批处理避免超时。",
+    "default": 20
+  },
+  "summary_llm_refine_max_chars": {
+    "type": "int",
+    "description": "提炼后最大字数",
+    "default": 300
+  },
   "recall_graph_route": {
     "type": "bool",
     "description": "实体/关系路召回",
