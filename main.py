@@ -96,7 +96,7 @@ except ImportError:  # 测试/单文件按顶层 import main 时
 _clock = clock  # 兼容老测试/脚本：main._clock
 
 PLUGIN_NAME = "Astrbot_amoupup_data"
-PLUGIN_VERSION = "3.5.2"  # 与 metadata.yaml 保持一致；发版时统一 bump
+PLUGIN_VERSION = "3.5.3"  # 与 metadata.yaml 保持一致；发版时统一 bump
 DEFAULT_BOT_ID = "default"
 
 

@@ -1,3 +1,12 @@
+## 3.5.3（2026-11-27 面板移除守护页）
+
+- 守护插件 2026-11-23 停用后，数据面板仍留着「守护」tab 和 `panel-guard`：没有数据源，
+  点开是空白，导航和面板也对不上。整页移除（`data-tab="guard"` / `id="panel-guard"` /
+  `data-guard=` / `loadGuard` / `renderGuard` 全部清掉），其余 tab 不动。
+- 新增 `tests/test_dashboard_guard_removed.py`：钉住「面板里不再出现守护」，并校验
+  `data-tab` 与 `id="panel-*"` 两边一一对应——以后加/删页漏改一边会直接红。
+- 测试 209 项通过 / 5 skipped。
+
 ## 3.5.2（2026-11-26 摘要语义化 + 实体图清理）
 
 - 每日维护新增「LLM 提炼聊天摘要」：把 `[YYYY-MM-DD 共N条]` 这种原文拼接式摘要改写成语义摘要，召回更准。新增 `summary_llm_refine_enabled`（默认开）、`summary_llm_refine_batch`（每次几条，默认 20）、`summary_llm_refine_max_chars`。
